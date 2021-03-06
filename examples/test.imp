@@ -1,0 +1,5 @@
+make x oftype number = 5 + 5;
+x = "test";
+
+log("Hello, World!");
+log(x);
