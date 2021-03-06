@@ -1,0 +1,9 @@
+make hie(x = 5, y) oftype string {
+  log(x);
+  log(y);
+
+  send "Hi"; $ return value "Hi"
+};
+
+make y oftype string = hie(,"Hi");
+log(y);

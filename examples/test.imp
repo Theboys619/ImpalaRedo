@@ -1,5 +1,22 @@
-make x oftype number = 5 + 5;
-x = "test";
+$ Basic function with a default value and return Type
+$ Return types are not required nor are default values
+make hie(x = 5, y) oftype string {
+  log(x);
+  log(y);
 
-log("Hello, World!");
-log(x);
+  send "Hi"; $ return value "Hi"
+};
+
+$ Skip first value and replace y with "Hi"
+$ First value if default will keep default value
+make y oftype string = hie(,"Hello");
+log(y);
+
+make z oftype function;
+z = hie;
+z(6,"Test");
+
+
+$ Also Rohil we need a syntax highlighter
+$ that would be nice - VSCode extension maybe??
+$ or add a editor in the website ???

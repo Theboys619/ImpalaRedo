@@ -17,9 +17,9 @@ namespace Impala {
 
   // Class for values like objects, ints, and other types
   // Used for casting and doing dynamic things
-	class Value {
+  class Value {
     ValueType type;
-		void* value;
+    void* value;
 
     public:
     std::string explicitType;
@@ -28,9 +28,18 @@ namespace Impala {
     Value() {
       type = ValueType::Nothing;
       value = nullptr;
+      explicitType = "nothing";
     };
-    Value(ValueType type, void* value): type(type), value(value) {};
-    Value(int val, std::string explicitType = "any"): explicitType(explicitType) {
+
+    Value(ValueType type, void* value, std::string explicitType = "any")
+    : type(type),
+      value(value),
+      explicitType(explicitType) {};
+
+
+    Value(int val, std::string explicitType = "any")
+    : explicitType(explicitType)
+    {
       type = ValueType::Int;
       value = new int(val);
     }
@@ -45,7 +54,7 @@ namespace Impala {
       } else if (type == ValueType::Int) {
         return std::to_string(Cast<int>());
       } else {
-        return "Nothing";
+        return "";
       }
     }
 
@@ -63,7 +72,82 @@ namespace Impala {
     }
 
     Value* operator+(Value& b) {
-      return new Value(Cast<int>() + b.Cast<int>(), "number");
+      ValueType bType = b.GetType();
+      if (type == ValueType::String) {
+        if (bType == ValueType::Int)
+          return new Value(Cast<std::string>() + std::to_string(b.Cast<int>()));
+
+        if (bType == ValueType::String)
+          return new Value(Cast<std::string>() + b.Cast<std::string>());
+      } else if (type == ValueType::Int) {
+        if (bType == ValueType::String)
+          throw Error("Cannot add number to string");
+
+        if (bType == ValueType::Int)
+          return new Value(Cast<int>() + b.Cast<int>(), "number");
+      }
+
+      throw Error("Cannot perform operation");
+    }
+
+    Value* operator-(Value& b) {
+      ValueType bType = b.GetType();
+      if (type == ValueType::String) {
+        throw Error("Cannot subract from string");
+      } else if (type == ValueType::Int) {
+        if (bType == ValueType::String)
+          throw Error("Cannot subtract string from number");
+
+        if (bType == ValueType::Int)
+          return new Value(Cast<int>() - b.Cast<int>(), "number");
+      }
+
+      throw Error("Cannot perform operation");
+    }
+
+    Value* operator/(Value& b) {
+      ValueType bType = b.GetType();
+      if (type == ValueType::String) {
+        throw Error("Cannot divide from string");
+      } else if (type == ValueType::Int) {
+        if (bType == ValueType::String)
+          throw Error("Cannot divide string from number");
+
+        if (bType == ValueType::Int)
+          return new Value(Cast<int>() / b.Cast<int>(), "number");
+      }
+
+      throw Error("Cannot perform operation");
+    }
+
+    Value* operator*(Value& b) {
+      ValueType bType = b.GetType();
+      if (type == ValueType::String) {
+        throw Error("Cannot multiply from string");
+      } else if (type == ValueType::Int) {
+        if (bType == ValueType::String)
+          throw Error("Cannot multiply string and number");
+
+        if (bType == ValueType::Int)
+          return new Value(Cast<int>() * b.Cast<int>(), "number");
+      }
+
+      throw Error("Cannot perform operation");
+    }
+
+    Value* operator%(Value& b) {
+      ValueType bType = b.GetType();
+      if (type == ValueType::String) {
+        throw Error("Cannot mod from string");
+      } else if (type == ValueType::Int) {
+        if (bType == ValueType::String)
+          throw Error("Cannot mod string and number");
+
+        if (bType == ValueType::Int)
+          return new Value(Cast<int>() % b.Cast<int>(), "number");
+      }
+
+      throw Error("Cannot perform operation");
     }
 	};
 
@@ -92,11 +176,25 @@ namespace Impala {
       return nullptr;
     }
 
+    bool checkType(std::string t1, std::string t2) {
+      return (
+        t1 == "any" || t2 == "nothing" || (t1 == t2)
+      );
+    }
+
     Value* Set(Expression* exp, Value* prop) {
       std::string type = Get(exp->value.getString())->explicitType;
 
-      if (type != "any" && type != prop->explicitType)
-        throw Error("Can't assign type " + prop->explicitType + " to variable of type " + type + ". Variable " + exp->value.getString() + ".");
+      if (!checkType(type, prop->explicitType)) {
+        if (
+          prop->GetType() != ValueType::Function &&
+          type != "function"
+        ) throw Error("Can't assign type " + prop->explicitType + " to variable of type " + type + ". Variable " + exp->value.getString() + ".");
+        else if (
+          prop->GetType() == ValueType::Function &&
+          type != "function"
+        ) throw Error ("Can't assign type Function to variable of type " + type + ". Variable " + exp->value.getString());
+      }
 
       Set(exp->value.getString(), prop);
     }
@@ -107,6 +205,23 @@ namespace Impala {
         return scope->Define(key, prop);
       else
         return Define(key, prop);
+    }
+
+    Value* Define(Expression* exp, Value* prop) {
+      std::string type = exp->dataType;
+
+      if (!checkType(type, prop->explicitType)) {
+        if (
+          prop->GetType() != ValueType::Function &&
+          type != "function"
+        ) throw Error("Can't assign type " + prop->explicitType + " to variable of type " + type + ". Variable " + exp->value.getString() + ".");
+        else if (
+          prop->GetType() == ValueType::Function &&
+          type != "function"
+        ) throw Error ("Can't assign type Function to variable of type " + type + ". Variable " + exp->value.getString());
+      }
+      
+      return Define(exp->value.getString(), prop);
     }
 
     Value* Define(std::string key, Value* prop) {
@@ -214,7 +329,7 @@ namespace Impala {
     bool checkType(Expression* exp, std::string type) {
       std::string expType = exp->dataType;
 
-      return expType == type;
+      return expType == "any" || expType == type;
     }
 
     Value* iIdentifier(Expression* exp, Scope* scope) {
@@ -247,11 +362,13 @@ namespace Impala {
       if (op == "+") {
         return *a + *b;
       } else if (op == "-") {
-        // return a - b;
+        return *a - *b;
       } else if (op == "/") {
-        // return a / b;
+        return *a / *b;
       } else if (op == "*") {
-        // return a * b;
+        return *a * (*b);
+      } else if (op == "%") {
+        return *a % *b;
       }
 
       return new Value();
@@ -289,7 +406,7 @@ namespace Impala {
       for (Expression* expr : block) {
         returnValue = Evaluate(expr, newScope); // Evaluate each statement or expression
 
-        if (returnValue != nullptr && returnValue->returned)
+        if (scope != topScope && returnValue != nullptr && returnValue->returned)
           return returnValue; // Check if it is a returnValue or has been returned and return (only for functions)
       }
 
@@ -308,13 +425,23 @@ namespace Impala {
       return ((Function*)func)->Call(exp->args, scope->Extend()); // Extend the scope since we are now interpreting the functions body
     }
 
+    Value* iReturn(Expression* exp, Scope* scope) {
+      Value* returnVal = Evaluate(exp->scope, scope);
+      returnVal->returned = true;
+
+      return returnVal;
+    }
+
     // Main evaluator / visitor
+    // I realize this now I probably have lots of memory leaks
     Value* Evaluate(Expression* exp, Scope* scope) {
       switch(exp->type) { // Huge switch statement for garbage (interpreting expressions)
         case ExprTypes::Scope:
           return iScope(exp, scope);
 
         case ExprTypes::None:  // TBI
+          return new Value();
+
         case ExprTypes::While:
         case ExprTypes::For:
         case ExprTypes::If:
@@ -351,7 +478,11 @@ namespace Impala {
           return iFunction(exp, scope);
         
         case ExprTypes::FunctionDecl: // TBI
+          break;
+
         case ExprTypes::Return:
+          return iReturn(exp, scope);
+
         case ExprTypes::Datatype:
           break;
 
@@ -378,6 +509,8 @@ namespace Impala {
   };
 
   Value* Function::Call(std::vector<Expression*> args, Scope* scp) {
+    // exp, scope, argsDefs
+
     std::vector<Value*> vals = {};
 
     for (Expression* exp : args) {
@@ -390,5 +523,37 @@ namespace Impala {
     }
 
     // TODO - Impala Functions
+
+    Scope* newScope = scp->Extend();
+    
+    for (int i = 0; i < argsDefs.size(); i++) {
+      newScope->Define(argsDefs[i], new Value());
+
+      if (argsDefs[i]->type == ExprTypes::Assign) {
+        Expression* exp = argsDefs[i];
+        Value* right = interpreter->Evaluate(exp->right, newScope);
+
+        newScope->Define(exp->left, right);
+
+        if (vals[i]->explicitType == "nothing") continue;
+      }
+
+      if (i >= vals.size()) {
+        continue;
+      };
+      
+      if (argsDefs[i]->type == ExprTypes::Assign)
+        newScope->Define(argsDefs[i]->left, vals[i]);
+      else
+        newScope->Define(argsDefs[i], vals[i]);
+    }
+
+    Value* returnValue = interpreter->Evaluate(exp->scope, newScope);
+
+    bool typeCheck = interpreter->checkType(exp, returnValue->explicitType);
+
+    if (!typeCheck) throw Error("Incorrect type returned.");
+
+    return returnValue;
   }
 }; // namespace Impala

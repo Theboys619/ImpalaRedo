@@ -26,9 +26,9 @@ int main(int argc, char** argv) {
   interp->Interpret(input);
 	Expression* ast = interp->ast;
 
-	std::cout <<
-		"Variable Name: " << ast->block[0]->left->value.getString() << "  "
-		<< "Value: " << ast->block[0]->right->value.getString() << std::endl;
+	// std::cout <<
+	// 	"Variable Name: " << ast->block[0]->left->value.getString() << "  "
+	// 	<< "Value: " << ast->block[0]->right->value.getString() << std::endl;
 
   return 0;
 }

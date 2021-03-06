@@ -12,6 +12,7 @@ namespace Impala {
 		while(std::getline(file, line)) {
 			if (isFirst) {
 				text += line;
+        isFirst = false;
 			} else {
 				text += '\n' + line;
 			}

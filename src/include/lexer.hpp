@@ -178,6 +178,14 @@ namespace Impala {
 				if (isWhitespace(curChar))
 					advance();
 
+        if (isComment(curChar)) {
+					advance();
+
+					while (curChar != '\0' && curChar != '\n')
+						advance();
+
+				}
+
 				if (curChar == '\n') {
 					index = 0;
 					++line;
@@ -185,13 +193,6 @@ namespace Impala {
 					advance();
 
 					//tokens.push_back(Token("Linebreak", "\n"));
-				}
-
-				if (isComment(curChar)) {
-					advance();
-
-					while (curChar != '\0' && curChar != '\n')
-						advance();
 				}
 
 				if (isDelimiter(curChar)) {

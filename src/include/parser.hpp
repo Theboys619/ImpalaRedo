@@ -254,6 +254,7 @@ namespace Impala {
 					expr->left = left;
 					expr->op = op;
 					expr->right = pBinary(isCall(pAll()), newPrec);
+          expr->dataType = expr->right->dataType;
 
 					return pBinary(expr, prec);
 				}
