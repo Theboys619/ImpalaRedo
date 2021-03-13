@@ -11,14 +11,19 @@ namespace Impala {
 		{ "oftype", "Keyword" },
 		{ "function", "typeKW" },
 		{ "number", "typeKW" },
+		{ "boolean", "typeKW" },
 		{ "string", "typeKW" },
 		{ "nothing", "typeKW" },
 		{ "any", "typeKW" },
+    { "class", "Keyword" },
 		{ "if", "Keyword" },
 		{ "else", "Keyword" },
 		{ "import", "Keyword" },
 		{ "from", "Keyword" },
-		{ "as", "Keyword" }
+		{ "as", "Keyword" },
+    { "true", "Keyword" },
+    { "false", "Keyword" },
+    { "loop", "Keyword" },
 	};
 	
 	class Token {
@@ -26,6 +31,7 @@ namespace Impala {
 
 		public:
 		std::string type;
+    std::string file;
 
 		int line = 0;
 		int index = 0;
@@ -50,6 +56,14 @@ namespace Impala {
 			value = new std::string(val);
 		}
 		Token(std::string type, void* value): type(type), value(value) {};
+
+    void SetFile(std::string f) {
+      file = f;
+    }
+
+    std::string getFile() {
+      return file;
+    }
 
 		std::string getString() {
 			return *(std::string*)value;
@@ -147,12 +161,14 @@ namespace Impala {
 			);
 		}
 
-		bool isOperator(char c) {
+		int isOperator(char c) {
 			if (
 				(c == '=' && peek() == '=') ||
 				(c == '!' && peek() == '=') ||
 				(c == '&' && peek() == '&') ||
-				(c == '|' && peek() == '|')
+				(c == '|' && peek() == '|') ||
+        (c == '<' && peek() == '=') ||
+        (c == '>' && peek() == '=')
 			) return 2;
 			else if (
 				(c == '+') ||
@@ -160,7 +176,9 @@ namespace Impala {
 				(c == '*') ||
 				(c == '/') ||
 				(c == '%') ||
-				(c == '=')
+				(c == '=') ||
+        (c == '<') ||
+        (c == '>')
 			) return 1;
 			else return 0;
 		}
@@ -169,7 +187,7 @@ namespace Impala {
 			return c == '$';
 		}
 
-		std::vector<Token> tokenize() {
+		std::vector<Token> tokenize(std::string file = "unknown") {
 			curChar = input[0];
 
 			while (curChar != '\0') {
@@ -199,6 +217,7 @@ namespace Impala {
           Token tok = Token("Delimiter", curChar);
           tok.index = index;
           tok.line = line;
+          tok.SetFile(file);
 
           advance();
 
@@ -232,6 +251,7 @@ namespace Impala {
           Token tok = Token(type, val.c_str());
           tok.index = ind;
           tok.line = ln;
+          tok.SetFile(file);
 
           tokens.push_back(tok);
         }
@@ -251,6 +271,7 @@ namespace Impala {
           Token tok = Token("Operator", op.c_str());
           tok.index = ind;
           tok.line = ln;
+          tok.SetFile(file);
 
           tokens.push_back(tok);
         }
@@ -274,6 +295,7 @@ namespace Impala {
 					Token tok = Token(val);
 					tok.index = ind;
 					tok.line = ln;
+          tok.SetFile(file);
 
 					tokens.push_back(tok);
 				}
@@ -296,6 +318,7 @@ namespace Impala {
           Token tok = Token(type, val.c_str());
           tok.index = ind;
           tok.line = ln;
+          tok.SetFile(file);
 
           tokens.push_back(tok);
         }
@@ -305,7 +328,9 @@ namespace Impala {
         }
 			}
 
-			tokens.push_back(Token("EndOfFile", "EOF"));
+      Token EOFT = Token("EndOfFile", "EOF");
+      EOFT.SetFile(file);
+			tokens.push_back(EOFT);
 
       return tokens;
 		}

@@ -1,0 +1,18 @@
+class Console {
+  make x;
+  make y;
+
+  $ Constructors
+
+  make Console(x, y) {
+    this.x = x;
+    this.y = y; 
+  };
+
+  make log() {
+    Impala.stdout.write(x);
+    Impala.stdout.write(y);
+  }
+};
+
+log(Console("hi", "there").log());

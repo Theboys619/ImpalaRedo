@@ -1,0 +1,18 @@
+class Array {
+  make length;
+  make arr;
+
+  make Array() {
+    length = 0;
+    arr = [];
+  }
+
+  make get(x) {
+    return arr[x];
+  }
+
+  make push(x) {
+    arr[length] = x;
+    length = length + 1;
+  }
+};

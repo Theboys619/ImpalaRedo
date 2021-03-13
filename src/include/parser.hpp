@@ -29,6 +29,10 @@ namespace Impala {
 		Int,
 		Float,
 		String,
+    Boolean,
+    Class,
+    Access,
+    Array,
 		Variable,
 		Identifier,
 		Assign,
@@ -49,6 +53,10 @@ namespace Impala {
 		"Int",
 		"Float",
 		"String",
+    "Boolean",
+    "Class",
+    "Access",
+    "Array",
 		"Variable",
 		"Identifier",
 		"Assign",
@@ -70,9 +78,17 @@ namespace Impala {
     ExprTypes type;
     Token value;
 
-    Expression* left;
+    union {
+      Expression* left;
+      Expression* assign;
+    };
+
     Token op;
-    Expression* right;
+    
+    union {
+      Expression* right;
+      Expression* reassign;
+    };
 
     bool isArray;
     Expression* then;
@@ -82,9 +98,11 @@ namespace Impala {
     std::vector<Expression*> block;
     std::vector<Expression*> args;
 
+    Token parent;
 		Token identifier;
 		std::string dataType;
     Expression* dotOp;
+    Expression* access;
 
     Expression(Token value): type(ExprTypes::None), value(value) {};
     Expression(ExprTypes type, Token value): type(type), value(value) {};
@@ -138,32 +156,59 @@ namespace Impala {
       return curTok.type == "EndOfFile";
     }
 
-		void skipOverVal(std::string val, Token tok) {
-      if (tok.getString() != val) throw SyntaxError(tok.getString());
+    bool isSkipable(Expression* expr) {
+      if (expr == nullptr) return false;
 
-      advance();
+      ExprTypes type = expr->type;
+
+      return (
+        type == ExprTypes::Function ||
+        type == ExprTypes::If ||
+        type == ExprTypes::Class
+      );
     }
 
-    void skipOver(std::string type, std::string val) {
-      if (curTok.type != type || curTok.getString() != val) throw SyntaxError(curTok.getString());
+		void skipOverVal(std::string val, Token tok, Expression* expr = nullptr) {
+      bool skipable = isSkipable(expr);
 
-      advance();
-    }
-    void skipOver(std::string type) {
-      if (curTok.type != type) throw SyntaxError(curTok.getString());
+      if (!skipable && tok.getString() != val) throw SyntaxError(tok.getString());
 
-      advance();
+      if (!skipable)
+        advance();
     }
 
-    void skipOver(std::string type, Token tok) {
-      if (tok.type != type) throw SyntaxError(tok.getString());
+    void skipOver(std::string type, std::string val, Expression* expr = nullptr) {
+      bool skipable = isSkipable(expr);
 
-      advance();
+      if (!skipable && curTok.type != type || curTok.getString() != val) throw SyntaxError(curTok.getString());
+
+      if (!skipable)
+        advance();
     }
-    void skipOver(std::string type, std::string val, Token tok) {
-      if (tok.type != type || tok.getString() != val) throw SyntaxError(tok.getString());
+    void skipOver(std::string type, Expression* expr = nullptr) {
+      bool skipable = isSkipable(expr);
 
-      advance();
+      if (!skipable && curTok.type != type) throw SyntaxError(curTok.getString());
+
+      if (!skipable)
+        advance();
+    }
+
+    void skipOver(std::string type, Token tok, Expression* expr = nullptr) {
+      bool skipable = isSkipable(expr);
+      
+      if (!skipable && tok.type != type) throw SyntaxError(tok.getString());
+
+      if (!skipable)
+        advance();
+    }
+    void skipOver(std::string type, std::string val, Token tok, Expression* expr = nullptr) {
+      bool skipable = isSkipable(expr);
+
+      if (!skipable && tok.type != type || tok.getString() != val) throw SyntaxError(tok.getString());
+
+      if (!skipable)
+        advance();
     }
 
 		bool nonCallabes(Expression* expression) {
@@ -177,6 +222,7 @@ namespace Impala {
     std::vector<Expression*> pDelimiters(std::string start, std::string end, std::string separator) {
       std::vector<Expression*> values = {};
       bool isFirst = true;
+      bool skipable = false;
 
       skipOverVal(start, curTok);
 
@@ -186,11 +232,13 @@ namespace Impala {
         } else if (isFirst) {
           isFirst = false;
         } else {
-          skipOverVal(separator, curTok);
+          if (!skipable)
+            skipOverVal(separator, curTok);
         }
 
         Expression* val = pExpression();
         values.push_back(val);
+        skipable = isSkipable(val);
       }
       skipOverVal(end, curTok);
 
@@ -200,7 +248,6 @@ namespace Impala {
 		// Parse any prop / dot operations
 		// probably should change how this works
 		bool pDotOp(Expression* exp) {
-			// TODO
 			if (isType("Delimiter", ".")) {
         advance();
 
@@ -209,11 +256,39 @@ namespace Impala {
 
 				exp->identifier = curTok;
         exp->dotOp = pExpression();
+        exp->dotOp->parent = exp->value.getString();
         return true;
       }
 
       return false;
 		}
+
+    bool pIndexAccess(Expression* exp) {
+      if (isType("Delimiter", "[")) {
+        advance();
+
+        if (!isType("Int") && !isType("String") && !isType("Identifier"))
+          throw SyntaxError(curTok.getString());
+
+        exp->access = pExpression();
+
+        if (isType("Delimiter", "]", peek()))
+          advance();
+
+        if (!isType("Delimiter", "]"))
+          throw SyntaxError(curTok.getString());
+
+        advance();
+
+        pIndexAccess(exp->access);
+
+        return true;
+      }
+
+      exp->access = nullptr;
+
+      return false;
+    }
 
 		Expression* isCall(Expression* expression) {
       // Probably could change
@@ -222,10 +297,14 @@ namespace Impala {
 
     Expression* pCall(Expression* expr) {
       Expression* funcCall = new Expression(ExprTypes::FunctionCall, expr->value.getString());
+      funcCall->dotOp = nullptr;
+
       advance();
 
       funcCall->args = pDelimiters("(", ")", ",");
-
+      
+      pIndexAccess(expr);
+      pDotOp(funcCall);
 
       return funcCall;
     }
@@ -295,6 +374,8 @@ namespace Impala {
 			if (!isType("Delimiter", "(", peek()))
 				advance();
 
+      pIndexAccess(expr);
+
 			// Could / should change
 			if (!pDotOp(expr)) {
 				expr->dataType = pDatatype();
@@ -315,6 +396,8 @@ namespace Impala {
 
       if (curTok.getString() == "oftype")
         func->dataType = pDatatype();
+      else
+        func->dataType = "any";
 
 			func->scope->block = pDelimiters("{", "}", ";");
 
@@ -335,6 +418,160 @@ namespace Impala {
 			return identifier;
 		}
 
+    Expression* pSmallIf(Expression* condition) {
+      Expression* ifStmt = new Expression(ExprTypes::If, curTok);
+      ifStmt->dataType = "any";
+
+      Expression* then = pExpression();
+      Expression* els = nullptr;
+
+      if (curTok.getString() == ";" && isType("Keyword", "else", peek())) advance();
+
+      if (isType("Keyword", "else")) {
+        advance();
+
+        if (isType("Delimiter", ":")) {
+          advance();
+          els = pExpression();
+        } else if (isType("Keyword", "if"))
+          els = pIf();
+        else {
+          if (!isType("Delimiter", "{"))
+            els = pExpression();
+          else {
+            els = new Expression(ExprTypes::Scope, curTok);
+            els->block = pDelimiters("{", "}", ";");
+          }
+        }
+      }
+
+      ifStmt->then = then;
+      ifStmt->condition = condition;
+
+      if (els != nullptr)
+        ifStmt->els = els;
+
+      return ifStmt;
+    }
+
+    Expression* pIf() {
+      advance();
+
+      Expression* ifStmt = new Expression(ExprTypes::If, curTok);
+      ifStmt->dataType = "any";
+
+      Expression* condition = pExpression();
+      condition->dataType = "boolean";
+
+      if (isType("Delimiter", ":")) {
+        advance();
+        return pSmallIf(condition);
+      }
+
+
+      Expression* then = nullptr;
+      Expression* els = nullptr;
+
+      if (!isType("Delimiter", "{"))
+        then = pExpression();
+      else {
+        then = new Expression(ExprTypes::Scope, curTok);
+        then->block = pDelimiters("{", "}", ";");
+      }
+
+      if (isType("Keyword", "else")) {
+        advance();
+
+        if (isType("Delimiter", ":")) {
+          advance();
+          els = pExpression();
+        } else if (isType("Keyword", "if"))
+          els = pIf();
+        else {
+          if (!isType("Delimiter", "{"))
+            els = pExpression();
+          else {
+            els = new Expression(ExprTypes::Scope, curTok);
+            els->block = pDelimiters("{", "}", ";");
+          }
+        }
+      }
+
+      ifStmt->then = then;
+      ifStmt->condition = condition;
+
+      if (els != nullptr)
+        ifStmt->els = els;
+
+      return ifStmt;
+    }
+
+    Expression* pClass() {
+      advance();
+
+      Expression* clss = new Expression(ExprTypes::Class, curTok);
+      advance();
+
+      std::vector<Expression*> instructions = pDelimiters("{", "}", ";");
+
+      clss->scope = new Expression(ExprTypes::Scope, curTok);
+      clss->scope->block = instructions;
+
+      return clss;
+    }
+
+    Expression* pArray() {
+      Expression* arr = new Expression(ExprTypes::Array, curTok);
+      std::vector<Expression*> values = pDelimiters("[", "]", ",");
+      arr->block = values;
+      arr->dataType = "Array";
+
+      pDotOp(arr);
+
+      return arr;
+    }
+
+    Expression* pLoop() {
+      advance();
+      Expression* loop = new Expression(ExprTypes::For, curTok);
+
+      Expression* initial = nullptr;
+      Expression* condition = nullptr;
+      Expression* reassign = nullptr;
+      
+      skipOverVal("(", curTok);
+
+      if (isType("Delimiter", ";"))
+        advance();
+      else {
+        initial = pExpression();
+        if (isType("Delimiter", ";")) advance();
+      }
+
+      if (isType("Delimiter", ";"))
+        advance();
+      else {
+        condition = pExpression();
+        if (isType("Delimiter", ";")) advance();
+      }
+
+      if (isType("Delimiter", ";"))
+        advance();
+      else {
+        reassign = pExpression();
+      }
+
+      skipOverVal(")", curTok);
+      
+      loop->scope = new Expression(ExprTypes::Scope, curTok);
+      loop->scope->block = pDelimiters("{", "}", ";");
+      loop->assign = initial;
+      loop->condition = condition;
+      loop->reassign = reassign;
+
+      return loop;
+    }
+
 		Expression* pAll() {
 			// Parse everything else
 			// TODO
@@ -353,6 +590,26 @@ namespace Impala {
 
 			if (isType("Keyword", "make"))
 				return pMake();
+
+      if (isType("Keyword", "if"))
+        return pIf();
+
+      if (isType("Keyword", "class"))
+        return pClass();
+
+      if (isType("Keyword", "loop"))
+        return pLoop();
+
+      if (isType("true") || isType("false")) {
+        advance();
+        token->type = ExprTypes::Boolean;
+        token->dataType = "boolean";
+
+        return token;
+      }
+
+      if (isType("Delimiter", "["))
+        return pArray();
 
 			if (isType("Int")) {
 				advance();
@@ -389,7 +646,11 @@ namespace Impala {
 				Expression* expr = pExpression();
 				ast->block.push_back(expr);
 
-				if (!curTok.isNull() && !isEOF()) skipOver("Delimiter", ";");
+				if (!curTok.isNull() && !isEOF()) {
+          bool skipable = isSkipable(expr);
+          if (!skipable)
+            skipOver("Delimiter", ";");
+        }
 			}
 
 			return ast;

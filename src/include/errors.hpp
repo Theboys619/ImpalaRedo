@@ -20,38 +20,32 @@ namespace Impala {
     }
   };
 
-  class SyntaxError : public std::exception {
+  class SyntaxError : public Error {
     public:
-    std::string message;
 
     SyntaxError(std::string message)
-      : message("SyntaxError: Invalid or unexpected token '" + message + "'")
-    {}
+      : Error("Invalid or unexpected token '" + message + "'", "SyntaxError")
+    {};
     SyntaxError(char message)
-      : message("SyntaxError: Invalid or unexpected token '" + std::string(1, message) + "'")
-    {}
+      : Error("Invalid or unexpected token '" + std::string(1, message) + "'", "SyntaxError")
+    {};
 
-    virtual const char* what() const throw() {
-      return message.c_str();
-    }
   };
 
-  class UndeclaredError : public std::exception {
+  class UndeclaredError : public Error {
     public:
     std::string message;
 
     UndeclaredError(std::string message)
-      : message("Error: Use of undeclared identifier '" + message + "'")
-    {}
-    
-    virtual const char* what() const throw() {
-      return message.c_str();
-    }
+      : Error("Use of undeclared identifier '" + message + "'")
+    {};
   };
 
   class TypeError : public Error {
     public:
-    TypeError(std::string message): Error(message, "TypeError") {};
+    TypeError(std::string t1, std::string t2, std::string v, std::string file)
+    : Error("Can't assign type " + t1 + " to variable " + v + " of type " + t2, "TypeError") {};
+
     TypeError(char message): Error(message, "TypeError") {};
   };
 };
