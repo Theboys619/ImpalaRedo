@@ -1,1 +1,3 @@
 /boost_1_75_0
+/dist
+/src/*.o
