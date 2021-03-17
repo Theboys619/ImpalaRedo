@@ -1,11 +1,12 @@
 #include <iostream>
-#include <boost/filesystem.hpp>
+#include <filesystem>
+#include "include/http.h"
 #include "include/filesystem.h"
 #include "include/interpreter.hpp"
+#include "include/globals.hpp"
 using namespace Impala;
-namespace fs = boost::filesystem;
 
-Value* log(std::vector<Value*> args, std::string file) {
+Value* log(std::vector<Value*> args, std::string file, Interpreter* interp) {
   for (Value* arg : args) {
     std::cout << arg->ToString() << " ";
   }
@@ -15,7 +16,7 @@ Value* log(std::vector<Value*> args, std::string file) {
   return new Value();
 }
 
-Value* input(std::vector<Value*> args, std::string file) {
+Value* input(std::vector<Value*> args, std::string file, Interpreter* interp) {
   for (Value* arg : args)
     std::cout << arg->ToString();
 
@@ -25,20 +26,13 @@ Value* input(std::vector<Value*> args, std::string file) {
   return new Value(x);
 }
 
-Value* fileReadImp(std::vector<Value*> args, std::string file) {
-  std::string fileName = args[0]->ToString();
-  fs::path fullfile = fs::path(file).remove_filename() / fs::path(fileName);
-
-  return new Value(readFile(fullfile.string()));
-}
-
 int raw(char* c, char** argv, Scope* globals, Interpreter* interp) {
   try {
     interp->RawInterp(c);
   } catch (Error& e) {
     std::string err = e.what();
 
-    std::cout << "\x1b[31m" << err << std::endl;
+    std::cout << "\x1b[31m" << err << "\x1b[0m" << std::endl;
   }
 
   return 0;
@@ -55,13 +49,11 @@ int main(int argc, char** argv) {
   globals->Define("input", new Function(interp, input));
   interp->SetGlobals(globals);
 
-  Value* Impala = new Value("[Impala]");
-  Impala->Define("readFile", new Function(interp, fileReadImp));
-  globals->Define("Impala", Impala);
+  DefineGlobals(interp, globals);
 
   if (std::string(argv[1]) == "-e")
     return raw(argv[2], argv, globals, interp);
-
+  
   fs::path impFile = argv[1];
   fs::path fullFile = fs::current_path() / impFile;
 

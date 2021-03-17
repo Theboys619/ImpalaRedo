@@ -1,1 +1,15 @@
 log("Hello, World!");
+class Botnic {
+  make tests;
+  
+  make Botnic() {
+    this.tests = "Cool";
+    this[0] = "Hi";
+  }
+
+  make cools() {
+    log(this[0]);
+  }
+}
+
+send Botnic;

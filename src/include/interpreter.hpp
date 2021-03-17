@@ -1,6 +1,11 @@
 #pragma once
 #include <regex>
 #include "parser.hpp"
+namespace fs = std::filesystem;
+
+// WARNING -------- WARNING
+// LOTS OF REDUNDANT / SPAGHETTI CODE BELOW
+// BE PREPARED TO BE BLINDED
 
 namespace Impala {
   class Interpreter; // To be able to use Interpreter*s in classes defined before Interpreter.
@@ -53,6 +58,7 @@ namespace Impala {
     Scope* objScope;
     Value* parent;
     std::string explicitType;
+    bool isClassObj = false;
     bool returned = false;
 
     Value() {
@@ -113,6 +119,10 @@ namespace Impala {
     void SetScope(Scope* scpe) {
       if (type == ValueType::Object)
         objScope = scpe;
+    }
+
+    std::unordered_map<std::string, Value*> GetProps() {
+      return props;
     }
 
     Scope* GetScope() {
@@ -342,6 +352,26 @@ namespace Impala {
 
       return new Value(ToBool() < b.ToBool(), "boolean");
     }
+
+    Value* operator<=(Value& b) {
+      if (type == ValueType::Int) {
+        return new Value(ToInt() <= b.ToInt(), "boolean");
+      } else if (type == ValueType::String) {
+        return new Value(ToString().size() <= b.ToString().size(), "boolean");
+      }
+
+      return new Value(ToBool() <= b.ToBool(), "boolean");
+    }
+
+    Value* operator>=(Value& b) {
+      if (type == ValueType::Int) {
+        return new Value(ToInt() >= b.ToInt(), "boolean");
+      } else if (type == ValueType::String) {
+        return new Value(ToString().size() >= b.ToString().size(), "boolean");
+      }
+
+      return new Value(ToBool() >= b.ToBool(), "boolean");
+    }
 	};
 
   class Class : public Value {
@@ -391,6 +421,7 @@ namespace Impala {
     public:
     Scope* parent;
     std::unordered_map<std::string, Value*> props = std::unordered_map<std::string, Value*>();
+    int extensions = 0;
 
     std::string filepath;
     bool ClassScope = false;
@@ -495,8 +526,6 @@ namespace Impala {
 
           if (propVal == nullptr) throw UndeclaredError(key);
 
-          propVal->parent = obj;
-
           return propVal;
         }
       }
@@ -505,6 +534,7 @@ namespace Impala {
     }
 
     Scope* Extend() {
+      extensions++;
       return new Scope(this);
     }
   };
@@ -526,7 +556,7 @@ namespace Impala {
   };
 
   // For native functions / C++ built in functions
-  typedef Value* (*CFunction)(std::vector<Value*>, std::string);
+  typedef Value* (*CFunction)(std::vector<Value*>, std::string, Interpreter*);
 
   // Function class to handle Native and Impala functions
   // Needs interpreter* for implementations below
@@ -545,10 +575,11 @@ namespace Impala {
     Function(Interpreter* interpreter, CFunction function)
     : function(function),
       interpreter(interpreter),
-      Value(ValueType::Function, nullptr)
+      Value(ValueType::Function, new std::string("[Function unknown]"))
     {
       exp = nullptr; // Since its native we don't use Expression* (ptrs)
       isNative = true;
+      explicitType = "function";
     }
 
     // Constructor for Impala Functions
@@ -556,18 +587,23 @@ namespace Impala {
     : interpreter(interpreter),
       exp(exp),
       scope(scope),
-      Value(ValueType::Function, nullptr)
+      Value(ValueType::Function, new std::string("[Function " + exp->value.getString() + "]"))
     {
       function = nullptr;
       isNative = false; // just incase
       argsDefs = exp->args; // args are Identifiers / definitions
       explicitType = exp->dataType;
     }
+    
+    virtual std::string ToString() {
+      return Cast<std::string>();
+    }
 
     // Defined instead of implemented because of the use of the Interpreter* which is defined after Function class
     // Needs to be imeplemented below interpreter
-    Value* Call(std::vector<Expression*> args, Scope* scp, bool checkType = true); // The Call Method
-    Value* Call(std::vector<Expression*> args, Scope* propScope, Scope* scp, bool checkType = true);
+    // Value* Call(std::vector<Value*> vals, Value* thisobj, Scope* scp, bool checkType = true);
+    Value* Call(std::vector<Value*> args, Value* thisobj, Scope* scp, bool checkType = true);
+    Value* Call(std::vector<Expression*> vals, Value* thisobj, Scope* scp, bool checkType = true);
   };
 
   // Main Interpreter class
@@ -575,17 +611,27 @@ namespace Impala {
     public:
     Expression* ast;
     Scope* topScope; // For Globals (Top / Main Scope)
+    Scope* globals;
+    Scope* currentScope;
+    std::string file = "unknown";
+
+    bool forGlobals = false;
 
     Interpreter() {
       topScope = new Scope();
+      globals = new Scope();
     }
 
     Interpreter(Scope* scope) {
       topScope = scope;
+      globals = new Scope();
+      globals->props = scope->props;
     }
 
     void SetGlobals(Scope* scope) {
       topScope = scope;
+      globals = new Scope();
+      globals->props = scope->props;
     }
 
     bool checkType(Expression* exp, std::string type) {
@@ -594,114 +640,152 @@ namespace Impala {
       return expType == "any" || expType == type;
     }
 
-    Value* GetProp(Value* prop, Expression* exp, Scope* scope) {
-      Scope* propScope = nullptr;
-      if (prop->parent != nullptr || prop->GetType() == ValueType::Object) {
-        propScope = prop->GetScope();
+    Value* GetIndex(Value* identifier, Expression* exp, Scope* scope, Value* thisObj = nullptr) {
+      if (thisObj == nullptr)
+        thisObj = identifier;
+
+      while (exp->access != nullptr) {
+        exp = exp->access;
+
+        Value* val = Evaluate(exp, scope);
+        std::string index = val->ToString();
+
+        if (identifier->GetType() == ValueType::Nothing)
+          throw Error("Cannot access index " + index + " from nothing.");
+
+        identifier = identifier->Get(index);
+
+        if (exp->dotOp != nullptr) {
+          return GetProp(identifier, exp, scope, thisObj);
+        }
       }
 
-      if (exp->type == ExprTypes::Assign) {
-        std::string propName = exp->left->value.getString();
-        Value* right = Evaluate(exp->right, (propScope != nullptr ? propScope : scope));
-
-        if (right->parent == nullptr)
-          right->parent = prop;
-
-        Value* newProp = prop->Define(propName, right);
-
-        return newProp;
-      }
-
-      if (exp->type == ExprTypes::Binary) {
-        Value* left = GetProp(prop, exp->left, scope);
-        Value* right = Evaluate(exp->right, scope);
-        std::string op = exp->op.getString();
-
-        return iOperation(left, right, op);
-      }
-      
-      if ((exp->type != ExprTypes::Identifier) && (exp->type != ExprTypes::FunctionCall))
-        throw Error("Cannot access property.");
-
-      Value* newProp = prop->Get(exp->value.getString());
-
-      if (prop->GetType() == ValueType::Nothing)
-        throw Error("Cannot access property " + exp->value.getString() + " from nothing.");
-
-      if (exp->access != nullptr) {
-        return AccessIndex(newProp, exp->access, scope);
-      }
-
-      if (exp->dotOp != nullptr) {
-        return GetProp(prop->Get(exp->value.getString()), exp->dotOp, (propScope != nullptr ? propScope : scope));
-      }
-
-      if (exp->type == ExprTypes::FunctionCall) {
-        if (newProp->GetType() != ValueType::Function)
-          throw Error("Cannot call function as it is not one.");
-
-        return ((Function*)newProp)->Call(exp->args, propScope->Extend(), scope->Extend());
-      }
-
-      return newProp;
+      return identifier;
     }
 
-    Value* AccessIndex(Value* prop, Expression* access, Scope* scope) {
-      Value* val = Evaluate(access, scope);
-      std::string index = val->ToString();
+    Value* GetParentIndex(Value* identifier, Expression* exp, Scope* scope, Value* thisObj = nullptr) {
+      if (thisObj == nullptr)
+        thisObj = identifier;
 
-      Value* item = prop->Get(index);
+      Value* parentIdentifier = thisObj;
+      bool isFirst = true;
 
-      if (prop->GetType() == ValueType::Nothing)
-        throw Error("Cannot access index " + index + " from nothing.");
+      while (exp->access != nullptr) {
+        exp = exp->access;
 
-      if (access->access != nullptr) {
-        return AccessIndex(item, access->access, scope);
+        Value* val = Evaluate(exp, scope);
+        std::string index = val->ToString();
+
+        if (identifier->GetType() == ValueType::Nothing)
+          throw Error("Cannot access index " + index + " from nothing.");
+
+        if (isFirst) {
+          parentIdentifier = thisObj;
+          identifier = parentIdentifier->Get(index);
+        } else {
+          parentIdentifier = identifier;
+          identifier = identifier->Get(index);
+        }
+
+        if (isFirst) isFirst = false;
       }
 
-      return item;
+      return parentIdentifier;
     }
 
-    Value* ParentAccessedIndex(Value* prop, Expression* access, Scope* scope) {
-      std::string index = Evaluate(access, scope)->ToString();
+    std::string GetLastIndex(Expression* exp, Scope* scope) {
+      std::string index = "";
 
-      Value* item = prop->Get(index);
+      while (exp->access != nullptr) {
+        exp = exp->access;
 
-      if (prop->GetType() == ValueType::Nothing)
-        throw Error("Cannot access index " + index + " from nothing.");
-
-      if (access->access != nullptr) {
-        return ParentAccessedIndex(item, access->access, scope);
+        Value* val = Evaluate(exp, scope);
+        index = val->ToString();
       }
-
-      return prop;
-    }
-
-    std::string GetLastIndex(Expression* access, Scope* scope) {
-      if (access->access != nullptr) {
-        return GetLastIndex(access->access, scope);
-      }
-
-      std::string index = Evaluate(access, scope)->ToString();
 
       return index;
     }
 
+    Value* GetProp(Value* identifier, Expression* exp, Scope* scope, Value* thisObj = nullptr) {
+      if (thisObj == nullptr)
+        thisObj = identifier;
+
+      while (exp->dotOp != nullptr) {
+        exp = exp->dotOp;
+
+        if (
+          identifier->GetType() == ValueType::Object &&
+          identifier->isClassObj
+        )
+          thisObj = identifier;
+
+        if (identifier->GetType() == ValueType::Nothing) {
+
+          throw Error("Cannot access property " + exp->value.getString() + " from nothing.");
+
+        }
+        
+        if (exp->type == ExprTypes::Assign) {
+
+          std::string propName = exp->left->value.getString();
+          Value* right = Evaluate(exp->right, scope);
+
+          if (exp->left->access != nullptr) {
+            return identifier->Get(propName)->Define(GetLastIndex(exp->left, scope), right);
+          }
+
+          return identifier->Define(propName, right);
+
+        } else if (exp->type == ExprTypes::Binary) {
+
+          Value* left = identifier->Get(exp->left->value.getString());
+          Value* right = Evaluate(exp->right, scope);
+          std::string op = exp->op.getString();
+
+          return iOperation(left, right, op);
+
+        } else if (exp->type == ExprTypes::Identifier) {
+
+          identifier = identifier->Get(exp->value.getString());
+
+        } else if (exp->type == ExprTypes::FunctionCall) {
+          identifier = identifier->Get(exp->value.getString());
+
+          if (identifier->GetType() != ValueType::Function)
+            throw Error("Cannot call function as it is not one.");
+
+          return ((Function*)identifier)->Call(exp->args, thisObj, scope);
+
+        } else {
+          throw Error("Cannot access property.");
+        }
+
+        if (exp->access != nullptr) {
+          return GetIndex(identifier, exp, scope, thisObj);
+        }
+
+      }
+
+      return identifier;
+    }
+
     Value* iIdentifier(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* identifier = scope->Get(exp->value.getString());
 
       if (exp->access != nullptr) {
-        return AccessIndex(identifier, exp->access, scope);
+        return GetIndex(identifier, exp, scope);
       }
 
       if (exp->dotOp != nullptr) {
-        return GetProp(identifier, exp->dotOp, scope);
+        return GetProp(identifier, exp, scope);
       }
 
       return identifier;
     }
 
     Value* iVariable(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* value = new Value();
       value->SetExplicit(exp->dataType);
 
@@ -714,49 +798,55 @@ namespace Impala {
     }
 
     Value* iAssign(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* right = Evaluate(exp->right, scope); // Visit / interpret right branch
 
-      if (exp->left->type == ExprTypes::Identifier) {
-        if (scope->parent != nullptr && scope->parent->ClassScope) {
-          Scope* scp = scope->parent->Lookup("this");
+      Expression* lexpr = exp->left;
+      std::string propName = lexpr->value.getString();
 
-          if (scp != nullptr) {
-            Value* obj = scp->Get("this");
+      if (lexpr->type == ExprTypes::Identifier) {
+        Value* thisObj = nullptr;
+        if (scope->HasProp("this"))
+          thisObj = scope->Get("this");
 
-            std::string propName = exp->left->value.getString();
+        if (scope->ClassScope || (thisObj != nullptr && thisObj->isClassObj)) {
+          if (thisObj == nullptr)
+            thisObj = scope->Get("this");
 
-            if (obj->HasProp(propName) && propName != "this") {
-              if (exp->left->access != nullptr) {
-                Value* val = ParentAccessedIndex(obj->Get(propName), exp->left->access, scope);
-                std::string index = GetLastIndex(exp->left->access, scope);
-                
-                val->Define(index, right);
-                scp->Define("this", obj);
-                scope->Define(exp->left, val);
-                return right;
-              }
+          if (thisObj->HasProp(propName) && propName != "this") {
+            
+            if (lexpr->access != nullptr) {
+              Value* val = GetParentIndex(thisObj, lexpr, scope, thisObj);
+              std::string index = GetLastIndex(lexpr, scope);
 
-              obj->Define(exp->left, right);
-              scp->Define("this", obj);
-              scope->Define(exp->left, right);
+
+              val->Define(index, right);
+              thisObj->Define(lexpr, val);
+              scope->Define("this", thisObj);
 
               return right;
             }
+
+            thisObj->Define(lexpr, right);
+            scope->Define("this", thisObj);
+
+            return right;
           }
+
         }
 
-        if (exp->left->access != nullptr) {
-          Value* val = ParentAccessedIndex(scope->Get(exp->left->value.getString()), exp->left->access, scope);
-          std::string index = GetLastIndex(exp->left->access, scope);
-          
+        if (lexpr->access != nullptr) {
+          Value* val = GetParentIndex(scope->Get(propName), lexpr, scope);
+          std::string index = GetLastIndex(lexpr, scope);
+
           val->Define(index, right);
-          scope->Define(exp->left, val);
+          scope->Define(lexpr, val);
+
           return right;
         }
-      } else {
-        Evaluate(exp->left, scope); // Visit / interpret left branch
       }
 
+      Value* left = Evaluate(exp->left, scope); // Visit / interpret left branch
       Value* val = iIdentifier(exp->left, scope); // Just checks to see if it exists
 
       scope->Set(exp->left, right); // Define or set the variable
@@ -787,6 +877,7 @@ namespace Impala {
     }
 
     Value* iBinary(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* a = Evaluate(exp->left, scope);
       Value* b = Evaluate(exp->right, scope);
       std::string op = exp->op.getString();
@@ -795,6 +886,7 @@ namespace Impala {
     }
 
     Value* iFunction(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Function* func = new Function(this, exp, scope); // Creates a new function with the interpreter
 
       // Check if it is already defined, if so throw an error.
@@ -807,19 +899,22 @@ namespace Impala {
       return func; // return it
     }
 
-    Value* iScope(Expression* exp, Scope* scope) {
+    Value* iScope(Expression* exp, Scope* scope, bool extend = true) {
+      currentScope = scope;
       Value* returnValue = nullptr;
 
       std::vector<Expression*> block = exp->block;
 
-      Scope* newScope = scope->Extend(); // Extend scope since we are going into a new scope
+      Scope* newScope = extend ? scope->Extend() : scope; // Extend scope since we are going into a new scope
 
       // Loop through each expression / statement
       for (Expression* expr : block) {
         returnValue = Evaluate(expr, newScope); // Evaluate each statement or expression
 
-        if (scope != topScope && returnValue != nullptr && returnValue->returned)
+        if (scope != topScope && returnValue != nullptr && returnValue->returned) {
+          returnValue->returned = false;
           return returnValue; // Check if it is a returnValue or has been returned and return (only for functions)
+        }
       }
 
       if (returnValue == nullptr) return new Value(); // return nothing;
@@ -828,6 +923,7 @@ namespace Impala {
     }
 
     Value* iFunctionCall(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* func = scope->Get(exp->value.getString()); // Gets the Value* which is actually a pointer to Function
 
       if (
@@ -836,38 +932,40 @@ namespace Impala {
       ) // If its not a pointer to the Function or Class throw an Error.
         throw Error("Cannot call function as it is not one.");
 
-      Scope* funcScope;
-      if (func->parent != nullptr)
-        funcScope = func->GetScope();
-      else
-        funcScope = scope->Extend();
+      Scope* funcScope = scope->Extend();
 
       if (func->GetType() == ValueType::Class) {
         Class* clss = (Class*)func;
         
-        Value* returnVal = clss->Construct(exp->args, funcScope);
+        Value* returnVal = clss->Construct(exp->args, scope);
 
-        if (exp->dotOp != nullptr)
-          return GetProp(returnVal, exp->dotOp, returnVal->GetScope());
+        if (exp->access != nullptr) {
+          return GetIndex(returnVal, exp, scope);
+        }
+
+        if (exp->dotOp != nullptr) {
+          return GetProp(returnVal, exp, scope);
+        }
 
         return returnVal;
       }
 
       // Cast to a Function* then call the method Call with appropiate arguments
-      Value* returnVal = ((Function*)func)->Call(exp->args, funcScope); // Extend the scope since we are now interpreting the functions body
+      Value* returnVal = ((Function*)func)->Call(exp->args, new Value(), funcScope); // Extend the scope since we are now interpreting the functions body
 
       if (exp->access != nullptr) {
-        return AccessIndex(returnVal, exp->access, scope);
+        return GetIndex(returnVal, exp, scope);
       }
 
       if (exp->dotOp != nullptr) {
-        return GetProp(returnVal, exp->dotOp, scope);
+        return GetProp(returnVal, exp, scope);
       }
       
       return returnVal;
     }
 
     Value* iReturn(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* returnVal = Evaluate(exp->scope, scope);
       returnVal->returned = true;
 
@@ -875,6 +973,7 @@ namespace Impala {
     }
 
     Value* iIf(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* condition = Evaluate(exp->condition, scope);
 
       if (condition->ToBool() || condition->ToInt()) {
@@ -888,19 +987,20 @@ namespace Impala {
     }
 
     Value* iClass(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Class* clss = new Class(this, exp, scope);
 
       if (scope->Lookup(exp->value.getString()) != nullptr) {
         throw Error("Class already defined");
       }
 
-      if (exp->parent.isNull())
-        scope->Define(exp->value.getString(), clss); // Define it
+      scope->Set(exp->value.getString(), clss); // Define it
 
       return clss; // return it
     }
 
     Value* iArray(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* val = new Value(ValueType::Object, "[Object array]", "Array");
       for (int i = 0; i < exp->block.size(); i++) {
         val->Define(std::to_string(i), Evaluate(exp->block[i], scope));
@@ -910,6 +1010,7 @@ namespace Impala {
     }
 
     Value* iFor(Expression* exp, Scope* scope) {
+      currentScope = scope;
       Value* variable = nullptr;
       Value* condition = new Value(true, "boolean");
       Value* reassign = nullptr;
@@ -952,6 +1053,33 @@ namespace Impala {
       if (returnValue == nullptr) return new Value();
 
       return returnValue;
+    }
+
+    Value* iImport(Expression* exp, Scope* scope) {
+      Interpreter* interp = new Interpreter(globals);
+      std::string fileName = exp->value.getString();
+      fs::path fullfile = fs::path(file).remove_filename() / fs::path(fileName);
+      std::string data = fullfile.string();
+      bool isURL = false;
+
+      if (fileName.rfind("http", 0) == 0) {
+        isURL = true;
+        data = fetchUrl(fileName);
+      }
+
+      Value* item;
+
+      if (!isURL) {
+        item = interp->Interpret(data);
+      } else {
+        item = interp->RawInterp(data, fileName);
+      }
+
+      if (exp->assign != nullptr) {
+        scope->Define(exp->assign->value.getString(), item);
+      }
+
+      return item;
     }
 
     // Main evaluator / visitor
@@ -1014,6 +1142,9 @@ namespace Impala {
         case ExprTypes::FunctionDecl: // TBI
           break;
 
+        case ExprTypes::Import:
+          return iImport(exp, scope);
+
         case ExprTypes::Return:
           return iReturn(exp, scope);
 
@@ -1027,9 +1158,10 @@ namespace Impala {
       return new Value();
     }
 
-    Value* RawInterp(std::string r) {
+    Value* RawInterp(std::string r, std::string fileName = "stdio") {
       Lexer lexer = Lexer(r);
-      std::vector<Token> tokens = lexer.tokenize("stdio");
+      std::vector<Token> tokens = lexer.tokenize(fileName);
+      file = fileName;
 
       Parser parser = Parser(tokens);
       ast = parser.parse();
@@ -1037,7 +1169,7 @@ namespace Impala {
       return Evaluate(ast, topScope);
     }
 
-    Value* Interpret(std::string file, bool debug = false) {
+    Value* Interpret(std::string file, bool gbls = false, bool debug = false) {
       std::string input = readFile(file);
       Lexer lexer = Lexer(input);
       std::vector<Token> tokens = lexer.tokenize(file);
@@ -1050,12 +1182,31 @@ namespace Impala {
       ast = parser.parse();
 
       topScope->SetFile(file);
+      this->file = file;
 
-      return Evaluate(ast, topScope);
+      forGlobals = gbls;
+
+      return iScope(ast, topScope, false);
     };
+
+    Value* ConstructClass(std::string classType, std::vector<Expression*> args, Scope* scope) {
+      Value* func = scope->Get(classType); // Gets the Value* which is actually a pointer to Function
+
+      if (
+        func->GetType() != ValueType::Class
+      ) // If its not a pointer to the Function or Class throw an Error.
+        throw Error("Cannot construct class as it is not one.");
+
+      Class* clss = (Class*)func;
+      
+      Value* returnVal = clss->Construct(args, scope);
+
+      return returnVal;
+    }
   };
 
   Value* Class::Construct(std::vector<Expression*> args, Scope* scp) {
+    interpreter->currentScope = scp;
     Scope* newScope = scp->Extend();
     Value* obj = new Value(ValueType::Object, &explicitType, "object");
 
@@ -1103,93 +1254,36 @@ namespace Impala {
 
     newScope->ClassScope = true;
     obj->SetScope(newScope);
-    newScope->Define("this", obj);
+    obj->isClassObj = true;
 
     Function* constructor = (Function*)obj->Get(name);
     // interpreter->Evaluate(exp->scope, newScope);
 
-    Value* returnValue = constructor->Call(args, newScope, false);
+    Value* returnValue = constructor->Call(args, obj, newScope, false);
 
     obj->explicitType = name;
 
     return obj;
   }
 
-  Value* Function::Call(std::vector<Expression*> args, Scope* propScope, Scope* scp, bool checkType) {
-    // exp, scope, argsDefs
-
-    std::vector<Value*> vals = {};
-
-    for (Expression* exp : args) {
-      Value* arg = interpreter->Evaluate(exp, scp);
-      vals.push_back(arg);
-    }
-
+  Value* Function::Call(std::vector<Value*> args, Value* thisobj, Scope* scp, bool checkType) {
     if (function != nullptr) {
-      return this->function(vals, propScope->filepath); // Call native function with arguments (vals)
-    }
-
-    Scope* newScope = propScope->Extend();
-    newScope->ClassScope = propScope->ClassScope;
-    
-    for (int i = 0; i < argsDefs.size(); i++) {
-      newScope->Define(argsDefs[i], new Value());
-
-      if (argsDefs[i]->type == ExprTypes::Assign) {
-        Expression* exp = argsDefs[i];
-        Value* right = interpreter->Evaluate(exp->right, newScope);
-
-        newScope->Define(exp->left, right);
-
-        if (vals[i]->explicitType == "nothing") continue;
-      }
-
-      if (i >= vals.size()) {
-        continue;
-      };
-      
-      if (argsDefs[i]->type == ExprTypes::Assign)
-        newScope->Define(argsDefs[i]->left, vals[i]);
-      else
-        newScope->Define(argsDefs[i], vals[i]);
-    }
-
-    Value* returnValue = nullptr;
-
-    std::vector<Expression*> block = exp->scope->block;
-
-    for (Expression* expr : block) {
-      returnValue = interpreter->Evaluate(expr, newScope);
-
-      if (newScope != interpreter->topScope && returnValue != nullptr && returnValue->returned)
-        break;
-    }
-
-    if (checkType) {
-      bool typeCheck = interpreter->checkType(exp, returnValue->explicitType);
-
-      if (!typeCheck) throw Error("Incorrect type returned.");
-    }
-
-    return returnValue;
-  }
-
-  Value* Function::Call(std::vector<Expression*> args, Scope* scp, bool checkType) {
-    // exp, scope, argsDefs
-
-    std::vector<Value*> vals = {};
-
-    for (Expression* exp : args) {
-      Value* arg = interpreter->Evaluate(exp, scp);
-      vals.push_back(arg);
-    }
-
-    if (function != nullptr) {
-      return this->function(vals, scp->filepath); // Call native function with arguments (vals)
+      return this->function(args, scp->filepath, interpreter); // Call native function with arguments (args)
     }
 
     Scope* newScope = scp->Extend();
-    newScope->ClassScope = scp->ClassScope;
+    if (thisobj->GetType() != ValueType::Nothing)
+      newScope->Define("this", thisobj);
+    
+    if (thisobj->GetType() == ValueType::Object) {
+      Scope* s = thisobj->GetScope();
+
+      if (s != nullptr) {
+        newScope = s;
+        newScope->Define("this", thisobj);
+      }
+    }
+    
     
     for (int i = 0; i < argsDefs.size(); i++) {
       newScope->Define(argsDefs[i], new Value());
@@ -1200,17 +1294,17 @@ namespace Impala {
 
         newScope->Define(exp->left, right);
 
-        if (vals[i]->explicitType == "nothing") continue;
+        if (args[i]->explicitType == "nothing")
+          continue;
       }
 
-      if (i >= vals.size()) {
+      if (i >= args.size())
         continue;
-      };
       
       if (argsDefs[i]->type == ExprTypes::Assign)
-        newScope->Define(argsDefs[i]->left, vals[i]);
+        newScope->Define(argsDefs[i]->left, args[i]);
       else
-        newScope->Define(argsDefs[i], vals[i]);
+        newScope->Define(argsDefs[i], args[i]);
     }
 
     Value* returnValue = interpreter->Evaluate(exp->scope, newScope);
@@ -1221,5 +1315,19 @@ namespace Impala {
     }
 
     return returnValue;
+  }
+
+  Value* Function::Call(std::vector<Expression*> args, Value* thisobj, Scope* scp, bool checkType) {
+    interpreter->currentScope = scp;
+    // exp, scope, argsDefs
+
+    std::vector<Value*> vals = {};
+
+    for (Expression* exp : args) {
+      Value* arg = interpreter->Evaluate(exp, scp);
+      vals.push_back(arg);
+    }
+
+    return this->Call(vals, thisobj, scp, checkType);
   }
 }; // namespace Impala

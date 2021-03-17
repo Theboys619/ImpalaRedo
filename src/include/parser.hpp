@@ -34,6 +34,7 @@ namespace Impala {
     Access,
     Array,
 		Variable,
+    Import,
 		Identifier,
 		Assign,
 		Binary,
@@ -58,6 +59,7 @@ namespace Impala {
     "Access",
     "Array",
 		"Variable",
+    "Import",
 		"Identifier",
 		"Assign",
 		"Binary",
@@ -101,12 +103,31 @@ namespace Impala {
     Token parent;
 		Token identifier;
 		std::string dataType;
-    Expression* dotOp;
-    Expression* access;
+    Expression* dotOp = nullptr;
+    Expression* access = nullptr;
 
     Expression(Token value): type(ExprTypes::None), value(value) {};
     Expression(ExprTypes type, Token value): type(type), value(value) {};
   };
+
+  Expression* CreateString(std::string value) {
+    Token tokStr = Token(value);
+    Expression* str = new Expression(ExprTypes::String, tokStr);
+    str->dotOp = nullptr;
+    str->dataType = "string";
+
+    return str;
+  }
+
+  Expression* CreateIdentifier(std::string value, std::string dataType = "any") {
+    Token tokStr = Token(value, true);
+    Expression* identifier = new Expression(ExprTypes::Identifier, tokStr);
+    identifier->access = nullptr;
+    identifier->dotOp = nullptr;
+    identifier->dataType = dataType;
+
+    return identifier;
+  }
 
 	class Parser {
 		std::vector<Token> tokens;
@@ -164,7 +185,8 @@ namespace Impala {
       return (
         type == ExprTypes::Function ||
         type == ExprTypes::If ||
-        type == ExprTypes::Class
+        type == ExprTypes::Class ||
+        type == ExprTypes::For
       );
     }
 
@@ -215,6 +237,7 @@ namespace Impala {
       return (
         expression->type != ExprTypes::Function
         && expression->type != ExprTypes::If
+        && expression->type != ExprTypes::Return
       );
     }
 
@@ -303,7 +326,7 @@ namespace Impala {
 
       funcCall->args = pDelimiters("(", ")", ",");
       
-      pIndexAccess(expr);
+      pIndexAccess(funcCall);
       pDotOp(funcCall);
 
       return funcCall;
@@ -447,9 +470,7 @@ namespace Impala {
 
       ifStmt->then = then;
       ifStmt->condition = condition;
-
-      if (els != nullptr)
-        ifStmt->els = els;
+      ifStmt->els = els;
 
       return ifStmt;
     }
@@ -499,9 +520,7 @@ namespace Impala {
 
       ifStmt->then = then;
       ifStmt->condition = condition;
-
-      if (els != nullptr)
-        ifStmt->els = els;
+      ifStmt->els = els;
 
       return ifStmt;
     }
@@ -516,6 +535,7 @@ namespace Impala {
 
       clss->scope = new Expression(ExprTypes::Scope, curTok);
       clss->scope->block = instructions;
+      clss->access = nullptr;
 
       return clss;
     }
@@ -572,6 +592,24 @@ namespace Impala {
       return loop;
     }
 
+    Expression* pImport() {
+      advance();
+      Expression* identifier = nullptr;
+
+      if (isType("Identifier")) {
+        identifier = pIdentifier(new Expression(curTok));
+        skipOverVal("from", curTok);
+      }
+
+      Expression* imprt = new Expression(ExprTypes::Import, curTok);
+      imprt->assign = identifier;
+      imprt->access = nullptr;
+
+      advance();
+
+      return imprt;
+    }
+
 		Expression* pAll() {
 			// Parse everything else
 			// TODO
@@ -599,6 +637,9 @@ namespace Impala {
 
       if (isType("Keyword", "loop"))
         return pLoop();
+
+      if (isType("Keyword", "import"))
+        return pImport();
 
       if (isType("true") || isType("false")) {
         advance();

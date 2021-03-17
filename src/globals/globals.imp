@@ -8,11 +8,121 @@ class Array {
   }
 
   make get(x) {
-    return arr[x];
+    send arr[x];
+  }
+
+  make set(x, y) {
+    arr[x] = y;
   }
 
   make push(x) {
-    arr[length] = x;
+    this.arr[length] = x;
     length = length + 1;
   }
+
+  make pop() {
+    if (length == 0) send;
+
+    make element = arr[length - 1];
+    length = length - 1;
+    
+    arr[length] = "";
+
+    send element;
+  }
+
+  make indexOf(x) {
+    loop (make i; i < length; i = i + 1) {
+      make test = arr[i];
+      
+      if (test == x) {
+        send i;
+      }
+    }
+  }
+};
+
+class Object {
+  make Object() {}
+};
+
+class Stream {
+  make listeners;
+  make pending;
+  make buffer;
+  make ended;
+  make block;
+
+  make Stream() {
+    listeners = Object();
+    listeners.flush = Array();
+    listeners.data = Array();
+    listeners.end = Array();
+
+    pending = Array();
+
+		buffer = Array();
+
+		ended = 0;
+
+		block = 0;
+  }
+
+  make write(data) {
+		ended = 0;
+
+		pending.push(data);
+
+    make datao = this.listeners["data"];
+
+		loop (make i; i < datao.length; i = i + 1) {
+			make o = this.listeners.data;
+      make func = o.get(i);
+      func(this);
+		}
+	}
+
+	make flush() {
+		buffer = pending;
+
+		pending = Array();
+
+    make flusho = listeners["flush"];
+
+		loop (make i; i < flusho.length; i = i + 1) {
+			make o = this.listeners.flush;
+      make func = o.get(i);
+      func(this);
+		};
+	}
+
+	make on(event, fn) {
+		make eventlisteners = this.listeners[event];
+    eventlisteners.push(fn);
+	}
+
+	make read() {
+		if (buffer.length == 0) {
+			this.ended = 1;
+
+			make endo = listeners["end"];
+
+			loop (make i; i < endo.length; i = i + 1) {
+        make func = endo.get(i);
+        func(this);
+			};
+
+			send;
+		}
+
+		make data = buffer.get(0);
+
+		loop (make i = buffer.length - 1; i > 0; i = i - 1) {
+			buffer.set(i - 1, buffer.get(i));
+		};
+
+		buffer.pop();
+
+		send data;
+	}
 };
