@@ -1,6 +1,8 @@
 #pragma once
 #include <regex>
 #include "parser.hpp"
+#include "loadlib.hpp"
+#include "impala.h"
 namespace fs = std::filesystem;
 
 // WARNING -------- WARNING
@@ -11,600 +13,7 @@ namespace Impala {
   class Interpreter; // To be able to use Interpreter*s in classes defined before Interpreter.
   class Scope;
 
-  // Types for the Value Class to know where to cast and how to cast it
-  // Have to use this because of void* since we don't know the type
-  enum class ValueType {
-    Nothing,
-    String,
-    Bool,
-    Int,
-    Double,
-    Char,
-    Function,
-    Class,
-    Object
-  };
-
-  std::vector<std::string> ValueStrings = {
-		"Nothing",
-    "String",
-    "Bool",
-    "Int",
-    "Double",
-    "Char",
-    "Function",
-    "Class",
-    "Object"
-	};
-
-	std::string getValueString(ValueType type) {
-		return ValueStrings[((int)type)];
-	}
-
-  bool isNumber(std::string token)
-  {
-      return std::regex_match(token, std::regex(("((\\+|-)?[[:digit:]]+)(\\.(([[:digit:]]+)?))?")));
-  }
-
-  // Class for values like objects, ints, and other types
-  // Used for casting and doing dynamic things
-  class Value {
-    ValueType type;
-    void* value;
-
-    std::unordered_map<std::string, Value*> props = std::unordered_map<std::string, Value*>();
-
-    public:
-    Scope* objScope;
-    Value* parent;
-    std::string explicitType;
-    bool isClassObj = false;
-    bool returned = false;
-
-    Value() {
-      type = ValueType::Nothing;
-      value = nullptr;
-      explicitType = "nothing";
-      objScope = nullptr;
-      parent = nullptr;
-    };
-
-    Value(ValueType type, void* value, std::string explicitType = "any")
-    : type(type),
-      value(value),
-      explicitType(explicitType) {
-        parent = nullptr;
-        objScope = nullptr;
-      };
-
-    Value(ValueType type, std::string val, std::string explicitType = "any")
-    : type(type),
-      explicitType(explicitType)
-    {
-      value = new std::string(val);
-      objScope = nullptr;
-      parent = nullptr;
-    };
-
-    Value(bool val, std::string explicitType = "any")
-    : explicitType(explicitType)
-    {
-      type = ValueType::Bool;
-      value = new bool(val);
-      objScope = nullptr;
-      parent = nullptr;
-    }
-
-    Value(int val, std::string explicitType = "any")
-    : explicitType(explicitType)
-    {
-      type = ValueType::Int;
-      value = new int(val);
-      objScope = nullptr;
-      parent = nullptr;
-    }
-    Value(const char* val, std::string explicitType = "any"): explicitType(explicitType) {
-      type = ValueType::String;
-      value = new std::string(val);
-      objScope = nullptr;
-      parent = nullptr;
-    }
-    Value(std::string val, std::string explicitType = "any"): explicitType(explicitType) {
-      type = ValueType::String;
-      value = new std::string(val);
-      objScope = nullptr;
-      parent = nullptr;
-    }
-
-    void SetScope(Scope* scpe) {
-      if (type == ValueType::Object)
-        objScope = scpe;
-    }
-
-    std::unordered_map<std::string, Value*> GetProps() {
-      return props;
-    }
-
-    Scope* GetScope() {
-      if (type == ValueType::Object && objScope != nullptr)
-        return objScope;
-
-      if (parent != nullptr)
-        return parent->GetScope();
-
-      return nullptr;
-    }
-
-    virtual std::string ToString() {
-      if (type == ValueType::String) {
-        return Cast<std::string>();
-      } else if (type == ValueType::Int) {
-        return std::to_string(Cast<int>());
-      } else if (type == ValueType::Bool) {
-        bool v = Cast<bool>();
-        
-        if (v) return "true";
-        else return "false";
-      } else if (type == ValueType::Object) {
-        return "[Object " + Cast<std::string>() + "]";
-      } else {
-        return "";
-      }
-    }
-
-    void SetExplicit(std::string t) {
-      explicitType = t;
-    }
-
-    ValueType GetType() {
-      return type;
-    }
-
-    int ToInt() {
-      // No floating point yet
-
-      if (type == ValueType::String)
-        return std::stoi(Cast<std::string>());
-
-      if (type == ValueType::Nothing)
-        return 0;
-      
-      if (type == ValueType::Bool)
-        return Cast<bool>();
-
-      return Cast<int>();
-    }
-
-    bool ToBool() {
-      if (type == ValueType::Int)
-        return ToInt() == 1;
-
-      if (type != ValueType::Bool)
-        return type != ValueType::Nothing;
-
-      return Cast<bool>();
-    }
-
-    template<typename T>
-    T Cast() {
-      return T(*(T*)value);
-    }
-
-    bool HasProp(std::string key) {
-      if (props.size() < 1) return false;
-      return props.find(key) != props.end();
-    }
-
-    bool checkType(std::string t1, std::string t2) {
-      return (
-        t1 == "any" || t2 == "nothing" || (t1 == t2)
-      );
-    }
-
-    Value* Define(Expression* exp, Value* prop) {
-      if (exp->access != nullptr) {
-
-      }
-
-      std::string type = exp->dataType;
-
-      if (!checkType(type, prop->explicitType)) {
-        if (
-          prop->GetType() != ValueType::Function &&
-          type != "function"
-        ) throw TypeError(prop->explicitType, type, exp->value.getString(), exp->value.getFile());
-        else if (
-          prop->GetType() == ValueType::Function &&
-          type != "function"
-        ) throw TypeError("Function", type, exp->value.getString(), exp->value.getFile());
-      }
-      
-      return Define(exp->value.getString(), prop);
-    }
-
-    Value* Define(std::string key, Value* prop) {
-      return props[key] = prop;
-    }
-
-    void Define(std::string key) {
-      props[key] = new Value();
-    }
-
-    Value* Get(std::string key) {
-      if (HasProp(key))
-        return props[key];
-
-      return new Value();
-    }
-
-    Value* operator+(Value& b) {
-      ValueType bType = b.GetType();
-      if (type == ValueType::String) {
-        if (bType == ValueType::Int)
-          return new Value(Cast<std::string>() + std::to_string(b.Cast<int>()));
-
-        if (bType == ValueType::String)
-          return new Value(Cast<std::string>() + b.Cast<std::string>());
-      } else if (type == ValueType::Int) {
-        if (bType == ValueType::String)
-          throw Error("Cannot add number to string");
-
-        if (bType == ValueType::Int)
-          return new Value(Cast<int>() + b.Cast<int>(), "number");
-      }
-
-      throw Error("Cannot perform operation");
-    }
-
-    Value* operator-(Value& b) {
-      ValueType bType = b.GetType();
-      if (type == ValueType::String) {
-        throw Error("Cannot subract from string");
-      } else if (type == ValueType::Int) {
-        if (bType == ValueType::String)
-          throw Error("Cannot subtract string from number");
-
-        if (bType == ValueType::Int)
-          return new Value(Cast<int>() - b.Cast<int>(), "number");
-      }
-
-      throw Error("Cannot perform operation");
-    }
-
-    Value* operator/(Value& b) {
-      ValueType bType = b.GetType();
-      if (type == ValueType::String) {
-        throw Error("Cannot divide from string");
-      } else if (type == ValueType::Int) {
-        if (bType == ValueType::String)
-          throw Error("Cannot divide string from number");
-
-        if (bType == ValueType::Int)
-          return new Value(Cast<int>() / b.Cast<int>(), "number");
-      }
-
-      throw Error("Cannot perform operation");
-    }
-
-    Value* operator*(Value& b) {
-      ValueType bType = b.GetType();
-      if (type == ValueType::String) {
-        throw Error("Cannot multiply from string");
-      } else if (type == ValueType::Int) {
-        if (bType == ValueType::String)
-          throw Error("Cannot multiply string and number");
-
-        if (bType == ValueType::Int)
-          return new Value(Cast<int>() * b.Cast<int>(), "number");
-      }
-
-      throw Error("Cannot perform operation");
-    }
-
-    Value* operator%(Value& b) {
-      ValueType bType = b.GetType();
-      if (type == ValueType::String) {
-        throw Error("Cannot mod from string");
-      } else if (type == ValueType::Int) {
-        if (bType == ValueType::String)
-          throw Error("Cannot mod string and number");
-
-        if (bType == ValueType::Int)
-          return new Value(Cast<int>() % b.Cast<int>(), "number");
-      }
-
-      throw Error("Cannot perform operation");
-    }
-
-    Value* operator==(Value& b) {
-      if (type == ValueType::Int) {
-        if (b.GetType() == ValueType::String) {
-          if (isNumber(b.ToString())) {
-            return new Value(ToInt() == b.ToInt(), "boolean");
-          } else {
-            return new Value(false, "boolean");
-          }
-        }
-        return new Value(ToInt() == b.ToInt(), "boolean");
-      } else if (type == ValueType::String) {
-        return new Value(ToString() == b.ToString(), "boolean");
-      }
-
-      return new Value(ToBool() == b.ToBool(), "boolean");
-    }
-
-    Value* operator>(Value& b) {
-      if (type == ValueType::Int) {
-        return new Value(ToInt() > b.ToInt(), "boolean");
-      } else if (type == ValueType::String) {
-        return new Value(ToString().size() > b.ToString().size(), "boolean");
-      }
-
-      return new Value(ToBool() > b.ToBool(), "boolean");
-    }
-
-    Value* operator<(Value& b) {
-      if (type == ValueType::Int) {
-        return new Value(ToInt() < b.ToInt(), "boolean");
-      } else if (type == ValueType::String) {
-        return new Value(ToString().size() < b.ToString().size(), "boolean");
-      }
-
-      return new Value(ToBool() < b.ToBool(), "boolean");
-    }
-
-    Value* operator<=(Value& b) {
-      if (type == ValueType::Int) {
-        return new Value(ToInt() <= b.ToInt(), "boolean");
-      } else if (type == ValueType::String) {
-        return new Value(ToString().size() <= b.ToString().size(), "boolean");
-      }
-
-      return new Value(ToBool() <= b.ToBool(), "boolean");
-    }
-
-    Value* operator>=(Value& b) {
-      if (type == ValueType::Int) {
-        return new Value(ToInt() >= b.ToInt(), "boolean");
-      } else if (type == ValueType::String) {
-        return new Value(ToString().size() >= b.ToString().size(), "boolean");
-      }
-
-      return new Value(ToBool() >= b.ToBool(), "boolean");
-    }
-	};
-
-  class Class : public Value {
-    public:
-    std::vector<Expression*> instructions;
-    Interpreter* interpreter;
-    Scope* scope;
-    std::string name;
-
-    std::vector<Expression*> argsDefs = std::vector<Expression*>();
-
-    Class(): Value(ValueType::Class, nullptr) {
-      explicitType = "nothing";
-      name = "";
-    };
-
-    Class(Interpreter* intrp, std::string nme, Scope* scope)
-    : Value(ValueType::Class, nme, nme),
-      name(nme),
-      scope(scope)
-    {
-      instructions = {};
-      interpreter = intrp;
-      scope = nullptr;
-      explicitType = nme;
-    };
-
-    Class(Interpreter* intrp, Expression* exp, Scope* scope)
-    : Value(ValueType::Class, exp->value.getString(), exp->value.getString()),
-      scope(scope)
-    {
-      instructions = exp->scope->block;
-      interpreter = intrp;
-      explicitType = exp->value.getString();
-      name = exp->value.getString();
-    };
-
-    Value* Construct(std::vector<Expression*> args, Scope* scope);
-
-    virtual std::string ToString() {
-      return "[Class " + Cast<std::string>() + "]";
-    }
-  };
-
-  // Where variables are stored and different data
-  class Scope {
-    public:
-    Scope* parent;
-    std::unordered_map<std::string, Value*> props = std::unordered_map<std::string, Value*>();
-    int extensions = 0;
-
-    std::string filepath;
-    bool ClassScope = false;
-
-    Scope() {
-      parent = nullptr;
-      filepath = "unknown";
-    };
-    Scope(Scope* parent): parent(parent) {
-      filepath = parent->filepath;
-      ClassScope = parent->ClassScope;
-    }
-
-    void SetFile(std::string file) {
-      filepath = file;
-    }
-
-    bool HasProp(std::string key) {
-      if (props.size() < 1) return false;
-      return props.find(key) != props.end();
-    }
-
-    Scope* Lookup(std::string key) {
-      if (HasProp(key)) return this;
-
-      if (parent != nullptr)
-        return parent->Lookup(key);
-
-      return nullptr;
-    }
-
-    bool checkType(std::string t1, std::string t2) {
-      return (
-        t1 == "any" || t2 == "nothing" || (t1 == t2)
-      );
-    }
-
-    Value* Set(Expression* exp, Value* prop) {
-      std::string type = Get(exp->value.getString())->explicitType;
-
-      if (!checkType(type, prop->explicitType)) {
-        if (
-          prop->GetType() != ValueType::Function &&
-          type != "function"
-        ) throw TypeError(prop->explicitType, type, exp->value.getString(), exp->value.getFile());
-        else if (
-          prop->GetType() == ValueType::Function &&
-          type != "function"
-        ) throw TypeError ("Function", type, exp->value.getString(), exp->value.getFile());
-      }
-
-      Set(exp->value.getString(), prop);
-    }
-
-    Value* Set(std::string key, Value* prop) {
-      Scope* scope = Lookup(key);
-      if (scope != nullptr)
-        return scope->Define(key, prop);
-      else
-        return Define(key, prop);
-    }
-
-    Value* Define(Expression* exp, Value* prop) {
-      std::string type = exp->dataType;
-
-      if (!checkType(type, prop->explicitType)) {
-        if (
-          prop->GetType() != ValueType::Function &&
-          type != "function"
-        ) throw TypeError(prop->explicitType, type, exp->value.getString(), exp->value.getFile());
-        else if (
-          prop->GetType() == ValueType::Function &&
-          type != "function"
-        ) throw TypeError("Function", type, exp->value.getString(), exp->value.getFile());
-      }
-      
-      return Define(exp->value.getString(), prop);
-    }
-
-    Value* Define(std::string key, Value* prop) {
-      return props[key] = prop;
-    }
-
-    void Define(std::string key) {
-      props[key] = new Value();
-    }
-
-    Value* Get(std::string key) {
-      if (HasProp(key))
-        return props[key];
-
-      Scope* scope = Lookup(key);
-      if (scope != nullptr)
-        return scope->Get(key);
-
-      if (ClassScope) {
-        Value* obj = Get("this");
-        Value* propVal = new Value();
-
-        if (obj != nullptr && obj->GetType() != ValueType::Nothing) {
-          propVal = obj->Get(key);
-
-          if (propVal == nullptr) throw UndeclaredError(key);
-
-          return propVal;
-        }
-      }
-
-      throw UndeclaredError(key);
-    }
-
-    Scope* Extend() {
-      extensions++;
-      return new Scope(this);
-    }
-  };
-
-  class Args {
-    std::vector<Value*> args;
-
-    public:
-    Args() {};
-
-    Value* Get(int i) {
-      return args.at(i);
-    }
-
-    int Push(Value* value) {
-      args.push_back(value);
-      return args.size() - 1;
-    }
-  };
-
-  // For native functions / C++ built in functions
-  typedef Value* (*CFunction)(std::vector<Value*>, std::string, Interpreter*);
-
-  // Function class to handle Native and Impala functions
-  // Needs interpreter* for implementations below
-  class Function : public Value {
-    public:
-    Expression* exp;
-    Scope* scope;
-
-    CFunction function;
-    Interpreter* interpreter;
-    bool isNative = false;
-
-    std::vector<Expression*> argsDefs;
-
-    // Constructor for Native C++ Functions
-    Function(Interpreter* interpreter, CFunction function)
-    : function(function),
-      interpreter(interpreter),
-      Value(ValueType::Function, new std::string("[Function unknown]"))
-    {
-      exp = nullptr; // Since its native we don't use Expression* (ptrs)
-      isNative = true;
-      explicitType = "function";
-    }
-
-    // Constructor for Impala Functions
-    Function(Interpreter* interpreter, Expression* exp, Scope* scope)
-    : interpreter(interpreter),
-      exp(exp),
-      scope(scope),
-      Value(ValueType::Function, new std::string("[Function " + exp->value.getString() + "]"))
-    {
-      function = nullptr;
-      isNative = false; // just incase
-      argsDefs = exp->args; // args are Identifiers / definitions
-      explicitType = exp->dataType;
-    }
-    
-    virtual std::string ToString() {
-      return Cast<std::string>();
-    }
-
-    // Defined instead of implemented because of the use of the Interpreter* which is defined after Function class
-    // Needs to be imeplemented below interpreter
-    // Value* Call(std::vector<Value*> vals, Value* thisobj, Scope* scp, bool checkType = true);
-    Value* Call(std::vector<Value*> args, Value* thisobj, Scope* scp, bool checkType = true);
-    Value* Call(std::vector<Expression*> vals, Value* thisobj, Scope* scp, bool checkType = true);
-  };
+  // All other Objects / Classes in impala.h
 
   // Main Interpreter class
   class Interpreter {
@@ -1055,22 +464,59 @@ namespace Impala {
       return returnValue;
     }
 
+    Value* GetDynamicLib(std::string fileName) {
+      DynamicLib lib = DynamicLib(fileName); // OpenLib, CloseLib, GetSymbol(char *);
+      lib.OpenLib();
+
+      std::shared_ptr<InitFunction> init = lib.GetSymbol<InitFunction>("initmodule");
+      ImpModule* module = (*init)();
+      ModuleInfo* info = module->info;
+      Value* obj = new Impala::Value(Impala::ValueType::Object, "[C ImpCModule]");
+
+      const char* moduleName = info->moduleName;
+      std::vector<Definition> definitions = info->definitions;
+
+      for (Definition def : definitions) {
+        const char* funcName = def.name;
+        CFunction function = def.function;
+        int argCount = def.argCount;
+
+        obj->Define(funcName, new Function(this, function));
+      }
+
+      return obj;
+    }
+
     Value* iImport(Expression* exp, Scope* scope) {
       Interpreter* interp = new Interpreter(globals);
       std::string fileName = exp->value.getString();
       fs::path fullfile = fs::path(file).remove_filename() / fs::path(fileName);
       std::string data = fullfile.string();
       bool isURL = false;
+      bool isDLL = false;
 
       if (fileName.rfind("http", 0) == 0) {
         isURL = true;
         data = fetchUrl(fileName);
       }
 
+      if (hasEnding(fileName, std::string(".dll")))
+        isDLL = true;
+      if (hasEnding(fileName, std::string(".so")))
+        isDLL = true;
+      if (hasEnding(fileName, std::string(".dylib")))
+        isDLL = true;
+
+      if (isURL && isDLL) throw Error("Cannot externally use DLL file using HTTP.");
+
       Value* item;
 
       if (!isURL) {
-        item = interp->Interpret(data);
+        if (isDLL) {
+          item = interp->GetDynamicLib(fullfile);
+        } else {
+          item = interp->Interpret(data);
+        }
       } else {
         item = interp->RawInterp(data, fileName);
       }
@@ -1161,12 +607,18 @@ namespace Impala {
     Value* RawInterp(std::string r, std::string fileName = "stdio") {
       Lexer lexer = Lexer(r);
       std::vector<Token> tokens = lexer.tokenize(fileName);
-      file = fileName;
+      if (fileName != "stdio") {
+        this->file = fileName;
+      } else {
+        this->file = ".";
+      }
+
+      topScope->SetFile(this->file);
 
       Parser parser = Parser(tokens);
       ast = parser.parse();
 
-      return Evaluate(ast, topScope);
+      return iScope(ast, topScope, false);
     }
 
     Value* Interpret(std::string file, bool gbls = false, bool debug = false) {
@@ -1267,8 +719,10 @@ namespace Impala {
   }
 
   Value* Function::Call(std::vector<Value*> args, Value* thisobj, Scope* scp, bool checkType) {
+    if (scp == nullptr) scp = interpreter->currentScope;
     if (function != nullptr) {
-      return this->function(args, scp->filepath, interpreter); // Call native function with arguments (args)
+      if (thisobj == nullptr) thisobj = new Value();
+      return this->function(thisobj, args, scp->filepath); // Call native function with arguments (args)
     }
 
     Scope* newScope = scp->Extend();
@@ -1318,6 +772,7 @@ namespace Impala {
   }
 
   Value* Function::Call(std::vector<Expression*> args, Value* thisobj, Scope* scp, bool checkType) {
+    if (scp == nullptr) scp = interpreter->currentScope;
     interpreter->currentScope = scp;
     // exp, scope, argsDefs
 

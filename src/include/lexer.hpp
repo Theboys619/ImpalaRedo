@@ -187,6 +187,74 @@ namespace Impala {
 			return c == '$';
 		}
 
+    std::string unescape(const std::string& s) {
+      std::string res;
+      std::string::const_iterator it = s.begin();
+      while (it != s.end())
+      {
+        char c = *it++;
+        if (c == '\\' && it != s.end())
+        {
+          switch (*it++) {
+            case '\\': c = '\\'; break;
+            case 'n': c = '\n'; break;
+            case 't': c = '\t'; break;
+            case 'r': c = '\r'; break;
+            // all other escapes
+            default: {
+              *it--;
+              std::string tripple = "";
+              tripple += *it++;
+              tripple += *it++;
+              tripple += *it++;
+            
+              if (tripple == "033") {
+                c = '\033';
+                break;
+              } else if (tripple == "x1b") {
+                c = '\x1b';
+                break;
+              }
+
+              continue;
+            }
+          }
+        }
+
+        res += c;
+      }
+
+      return res;
+    }
+
+    std::string fixEscape(char c) {
+      std::string newStr = std::string(1, c) + std::string(1, peek());
+
+      if ((c == '\\') && (
+        peek() == '\\' ||
+        peek() == 'n' ||
+        peek() == 'r' ||
+        peek() == 't'
+      )) {
+        advance();
+        
+        newStr = unescape(newStr);
+
+        return newStr;
+      } else if ((c == '\\') && (
+        (peek() == '0' && peek(2) == '3' && peek(3) == '3') ||
+        (peek() == 'x' && peek(2) == '1' && peek(3) == 'b')
+      )) {
+        newStr = std::string(1, c);
+        newStr += std::string(1, peek()) + std::string(1, peek(2)) + std::string(1, peek(3));
+        advance(3);
+
+        return unescape(newStr);
+      } else {
+        return std::string(1, c);
+      }
+    }
+
 		std::vector<Token> tokenize(std::string file = "unknown") {
 			curChar = input[0];
 
@@ -286,7 +354,7 @@ namespace Impala {
 
 					while (curChar != '\0' && curChar != quote) {
 						if (curChar == '\n') throw SyntaxError("\\n");
-						val += curChar;
+						val += fixEscape(curChar);
 						advance();
 					}
 

@@ -1,8 +1,8 @@
 files := $(wildcard ./src/*.cpp)
 objs := $(files:%.cpp=%.o)
-CC := g++
+CC := g++-8
 CFLAGS := -std=c++2a
-LIBS := -lcurl
+LIBS = -lpthread -lstdc++fs -lssl -lcrypto -ldl
 
 .PHONY = dist/linux_x86/runtime
 
@@ -12,14 +12,13 @@ dist/linux_x86/runtime: $(objs)
 	$(CC) $(CFLAGS) $(objs) -o $@ $(LIBS)
 
 %.o: %.cpp
-	$(CC) $(CFLAGS) -c $< -o $@ $(LIBS)
-
-download:
-	sudo apt install libcurl4-openssl-dev
+	$(CC) $(CFLAGS) -c $< -o $@
 
 run:
 	clear
 	./dist/linux_x86/runtime ./examples/test.imp
+
+
 
 clean:
 	rm ./src/*.o

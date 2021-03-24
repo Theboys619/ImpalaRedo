@@ -1,4 +1,1 @@
-import text from "https://impala-docs.rohilpatel.repl.co/std/http/http.imp";
-
-Impala.stdout.write("Hello, World!");
-Impala.stdout.flush();
+log("Hello, World!");

@@ -6,7 +6,7 @@
 #include "include/globals.hpp"
 using namespace Impala;
 
-Value* log(std::vector<Value*> args, std::string file, Interpreter* interp) {
+Value* log(Value* self, std::vector<Value*> args, std::string file) {
   for (Value* arg : args) {
     std::cout << arg->ToString() << " ";
   }
@@ -16,7 +16,7 @@ Value* log(std::vector<Value*> args, std::string file, Interpreter* interp) {
   return new Value();
 }
 
-Value* input(std::vector<Value*> args, std::string file, Interpreter* interp) {
+Value* input(Value* self, std::vector<Value*> args, std::string file) {
   for (Value* arg : args)
     std::cout << arg->ToString();
 
