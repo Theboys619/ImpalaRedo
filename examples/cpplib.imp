@@ -1,5 +1,4 @@
 import h from "./libtest.so";
 
 h.printLol();
-
-log("NICE");
+h.lol().classes();

@@ -160,10 +160,47 @@ namespace Impala {
         } else if (exp->type == ExprTypes::FunctionCall) {
           identifier = identifier->Get(exp->value.getString());
 
-          if (identifier->GetType() != ValueType::Function)
+          if (
+            identifier->GetType() != ValueType::Function &&
+            identifier->GetType() != ValueType::Class
+          ) // If its not a pointer to the Function or Class throw an Error.
             throw Error("Cannot call function as it is not one.");
 
-          return ((Function*)identifier)->Call(exp->args, thisObj, scope);
+          Scope* funcScope = scope->Extend();
+
+          if (identifier->GetType() == ValueType::Class) {
+            Class* clss = (Class*)identifier;
+            bool isCPP = clss->cppmodule;
+
+            if (isCPP) {
+              clss->scope = scope->Extend();
+              clss->interpreter = this;
+            }
+            
+            Value* returnVal = clss->Construct(exp->args, scope);
+
+            if (exp->access != nullptr) {
+              return GetIndex(returnVal, exp, scope);
+            }
+
+            if (exp->dotOp != nullptr) {
+              return GetProp(returnVal, exp, scope);
+            }
+
+            return returnVal;
+          }
+
+          Value* returnVal = ((Function*)identifier)->Call(exp->args, thisObj, scope);
+
+          if (exp->access != nullptr) {
+            return GetIndex(returnVal, exp, scope);
+          }
+
+          if (exp->dotOp != nullptr) {
+            return GetProp(returnVal, exp, scope);
+          }
+          
+          return returnVal;
 
         } else {
           throw Error("Cannot access property.");
@@ -345,6 +382,12 @@ namespace Impala {
 
       if (func->GetType() == ValueType::Class) {
         Class* clss = (Class*)func;
+        bool isCPP = clss->cppmodule;
+
+        if (isCPP) {
+          clss->scope = scope->Extend();
+          clss->interpreter = this;
+        }
         
         Value* returnVal = clss->Construct(exp->args, scope);
 
@@ -471,17 +514,22 @@ namespace Impala {
       std::shared_ptr<InitFunction> init = lib.GetSymbol<InitFunction>("initmodule");
       ImpModule* module = (*init)();
       ModuleInfo* info = module->info;
-      Value* obj = new Impala::Value(Impala::ValueType::Object, "[C ImpCModule]");
+      Value* obj = new Impala::Value(Impala::ValueType::Object, "C ImpCModule");
 
       const char* moduleName = info->moduleName;
       std::vector<Definition> definitions = info->definitions;
 
       for (Definition def : definitions) {
-        const char* funcName = def.name;
-        CFunction function = def.function;
+        const char* defName = def.name;
+        CFunction func = def.function;
         int argCount = def.argCount;
+        Value* rvalue = def.value;
 
-        obj->Define(funcName, new Function(this, function));
+        if (func == nullptr) {
+          obj->Define(defName, rvalue);
+        } else {
+          obj->Define(defName, new Function(this, func));
+        }
       }
 
       return obj;
@@ -650,7 +698,13 @@ namespace Impala {
         throw Error("Cannot construct class as it is not one.");
 
       Class* clss = (Class*)func;
-      
+      bool isCPP = clss->cppmodule;
+
+      if (isCPP) {
+        clss->scope = scope;
+        clss->interpreter = this;
+      }
+
       Value* returnVal = clss->Construct(args, scope);
 
       return returnVal;
@@ -662,45 +716,65 @@ namespace Impala {
     Scope* newScope = scp->Extend();
     Value* obj = new Value(ValueType::Object, &explicitType, "object");
 
-    for (Expression* exp : instructions) {
-      if (
-        exp->type != ExprTypes::Function &&
-        exp->type != ExprTypes::Variable &&
-        exp->type != ExprTypes::Assign
-      ) throw Error("Can only have functions and variables in classes");
+    if (cppmodule) {
 
-      if (exp->type == ExprTypes::Function) {
-        Function* func = new Function(interpreter, exp, scope); // Creates a new function with the interpreter
+      for (Definition def : builtins) {
+        const char* defName = def.name;
+        CFunction cfunc = def.function;
+        int argCount = def.argCount;
+        Value* rvalue = def.value;
 
-        // Check if it is already defined, if so throw an error.
-        if (obj->Get(exp->value.getString())->GetType() != ValueType::Nothing) {
-          throw Error("Method already defined");
+        if (cfunc == nullptr) {
+          rvalue->parent = obj;
+          obj->Define(defName, rvalue);
+        } else {
+          Function* f = new Function(interpreter, cfunc);
+          f->parent = obj;
+          obj->Define(defName, f);
+        }
+      }
+
+    } else {
+      for (Expression* exp : instructions) {
+        if (
+          exp->type != ExprTypes::Function &&
+          exp->type != ExprTypes::Variable &&
+          exp->type != ExprTypes::Assign
+        ) throw Error("Can only have functions and variables in classes");
+
+        if (exp->type == ExprTypes::Function) {
+          Function* func = new Function(interpreter, exp, scope); // Creates a new function with the interpreter
+
+          // Check if it is already defined, if so throw an error.
+          if (obj->Get(exp->value.getString())->GetType() != ValueType::Nothing) {
+            throw Error("Method already defined");
+          }
+
+          if (exp->value.getString() == name)
+            func->explicitType = name;
+
+          func->parent = obj;
+          obj->Define(exp->value.getString(), func); // Define it
         }
 
-        if (exp->value.getString() == name)
-          func->explicitType = name;
+        if (exp->type == ExprTypes::Assign) {
+          Value* left = interpreter->Evaluate(exp->left, newScope); // Visit / interpret left branch
+          Value* right = interpreter->Evaluate(exp->right, newScope); // Visit / interpret right branch
+          Value* val = interpreter->iIdentifier(exp->left, newScope); // Just checks to see if it exists
+          right->parent = obj;
 
-        func->parent = obj;
-        obj->Define(exp->value.getString(), func); // Define it
-      }
+          obj->Define(exp->left, right); // Define the property
+        }
 
-      if (exp->type == ExprTypes::Assign) {
-        Value* left = interpreter->Evaluate(exp->left, newScope); // Visit / interpret left branch
-        Value* right = interpreter->Evaluate(exp->right, newScope); // Visit / interpret right branch
-        Value* val = interpreter->iIdentifier(exp->left, newScope); // Just checks to see if it exists
-        right->parent = obj;
+        if (exp->type == ExprTypes::Variable) {
+          Value* value = new Value();
+          value->SetExplicit(exp->dataType);
 
-        obj->Define(exp->left, right); // Define the property
-      }
-
-      if (exp->type == ExprTypes::Variable) {
-        Value* value = new Value();
-        value->SetExplicit(exp->dataType);
-
-        obj->Define(
-          exp->value.getString(),
-          value
-        );
+          obj->Define(
+            exp->value.getString(),
+            value
+          );
+        }
       }
     }
 
@@ -711,7 +785,7 @@ namespace Impala {
     Function* constructor = (Function*)obj->Get(name);
     // interpreter->Evaluate(exp->scope, newScope);
 
-    Value* returnValue = constructor->Call(args, obj, newScope, false);
+    Value* returnValue = (constructor != nullptr && (constructor->GetType() != ValueType::Nothing)) ? constructor->Call(args, obj, newScope, false) : nullptr;
 
     obj->explicitType = name;
 

@@ -404,4 +404,3 @@ namespace Impala {
 		}
 	};
 };
-

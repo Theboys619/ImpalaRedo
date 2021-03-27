@@ -4,14 +4,12 @@ class Console {
 
   $ Constructors
 
-  make Console(x, y) {
-    this.x = x;
-    this.y = y; 
-  };
+  make Console(x, y) {}
 
   make log() {
     Impala.stdout.write(x);
     Impala.stdout.write(y);
+    Impala.stdout.flush();
   }
 };
 

@@ -364,6 +364,66 @@ namespace Impala {
     }
 	};
 
+  // For native functions / C++ built in functions
+  extern "C" typedef Value* (*CFunction)(Value*, std::vector<Value*>, std::string);
+  extern "C" {
+    struct Definition {
+      const char* name;
+      CFunction function;
+      int argCount;
+      Value* value = nullptr;
+    };
+    struct ModuleInfo {
+      const char* moduleName;
+      std::vector<Definition> definitions;
+    };
+    class ImpModule {
+      public:
+      ModuleInfo* info;
+      Value* obj;
+
+      ImpModule(ModuleInfo* info, Value* obj): info(info), obj(obj) {};
+    };
+  };
+
+  class Class : public Value {
+    public:
+    std::vector<Expression*> instructions;
+    Interpreter* interpreter;
+    Scope* scope;
+    std::string name;
+
+    bool cppmodule = false;
+
+    std::vector<Expression*> argsDefs = std::vector<Expression*>();
+    std::vector<Definition> builtins;
+
+    Class(): Value(ValueType::Class, nullptr) {
+      explicitType = "nothing";
+      name = "";
+    };
+
+    Class(Interpreter* intrp, std::string nme, Scope* scope);
+    Class(Interpreter* intrp, Expression* exp, Scope* scope);
+
+    Class(std::string name, std::vector<Definition> definitions)
+    : Value(ValueType::Class, name, name),
+      name(name)
+    {
+      scope = nullptr;
+      interpreter = nullptr;
+      explicitType = name;
+      builtins = definitions;
+      cppmodule = true;
+    };
+
+    Value* Construct(std::vector<Expression*> args, Scope* scope);
+
+    virtual std::string ToString() {
+      return "[Class " + Cast<std::string>() + "]";
+    }
+  };
+
   // Where variables are stored and different data
   class Scope {
     public:
@@ -457,25 +517,6 @@ namespace Impala {
     }
   };
 
-  class Args {
-    std::vector<Value*> args;
-
-    public:
-    Args() {};
-
-    Value* Get(int i) {
-      return args.at(i);
-    }
-
-    int Push(Value* value) {
-      args.push_back(value);
-      return args.size() - 1;
-    }
-  };
-
-  // For native functions / C++ built in functions
-  extern "C" typedef Value* (*CFunction)(Value*, std::vector<Value*>, std::string);
-
   // Function class to handle Native and Impala functions
   // Needs interpreter* for implementations below
   class Function : public Value {
@@ -512,26 +553,6 @@ namespace Impala {
     // Value* Call(std::vector<Value*> vals, Value* thisobj, Scope* scp, bool checkType = true);
     Value* Call(std::vector<Value*> args, Value* thisobj, Scope* scp, bool checkType = true);
     Value* Call(std::vector<Expression*> vals, Value* thisobj, Scope* scp, bool checkType = true);
-  };
-
-
-  extern "C" {
-    struct Definition {
-      const char* name;
-      CFunction function;
-      int argCount;
-    };
-    struct ModuleInfo {
-      const char* moduleName;
-      std::vector<Definition> definitions;
-    };
-    class ImpModule {
-      public:
-      ModuleInfo* info;
-      Value* obj;
-
-      ImpModule(ModuleInfo* info, Value* obj): info(info), obj(obj) {};
-    };
   };
 
   typedef ImpModule* (*InitFunction)();

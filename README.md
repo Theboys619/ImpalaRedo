@@ -1,4 +1,4 @@
-## Imapala
+## Impala
 
 This is a redone version of a Repl.it code jam language I have made. This is completely different from that one though.
 

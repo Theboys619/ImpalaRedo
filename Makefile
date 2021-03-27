@@ -4,11 +4,11 @@ CC := g++-8
 CFLAGS := -std=c++2a
 LIBS = -lpthread -lstdc++fs -lssl -lcrypto -ldl
 
-.PHONY = dist/linux_x86/runtime
+.PHONY = dist/linux_x86/impala
 
-build: dist/linux_x86/runtime
+build: dist/linux_x86/impala
 
-dist/linux_x86/runtime: $(objs)
+dist/linux_x86/impala: $(objs)
 	$(CC) $(CFLAGS) $(objs) -o $@ $(LIBS)
 
 %.o: %.cpp
@@ -16,7 +16,7 @@ dist/linux_x86/runtime: $(objs)
 
 run:
 	clear
-	./dist/linux_x86/runtime ./examples/test.imp
+	./dist/linux_x86/impala ./examples/test.imp
 
 
 
