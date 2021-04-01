@@ -561,7 +561,7 @@ namespace Impala {
 
       if (!isURL) {
         if (isDLL) {
-          item = interp->GetDynamicLib(fullfile);
+          item = interp->GetDynamicLib(data);
         } else {
           item = interp->Interpret(data);
         }

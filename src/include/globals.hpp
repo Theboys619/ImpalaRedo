@@ -8,12 +8,12 @@ Value* fileReadImp(Value* self, std::vector<Value*> args, std::string file) {
 }
 
 Value* write(Value* self, std::vector<Value*> args, std::string file) {
-  Value* stdout = args[0];
-  Value* ended = stdout->Get("ended");
+  Value* outstream = args[0];
+  Value* ended = outstream->Get("ended");
 
   while (!ended->ToBool() || !ended->ToInt()) {
-    Value* x = ((Function*)stdout->Get("read"))->Call(std::vector<Value*>(), stdout, nullptr, false);
-    ended = stdout->Get("ended");
+    Value* x = ((Function*)outstream->Get("read"))->Call(std::vector<Value*>(), outstream, nullptr, false);
+    ended = outstream->Get("ended");
 
     if (x->GetType() == ValueType::Nothing)
       break;
@@ -21,7 +21,7 @@ Value* write(Value* self, std::vector<Value*> args, std::string file) {
     std::cout << x->ToString();
   }
 
-  return stdout;
+  return outstream;
 }
 
 void DefineGlobals(Interpreter* interp, Scope* globals) {
@@ -35,11 +35,11 @@ void DefineGlobals(Interpreter* interp, Scope* globals) {
   Impala->Define("readFile", new Function(interp, fileReadImp));
   
   // Adding stdout to Impala Object
-  Value* stdout = interp->ConstructClass("Stream", {}, interp->topScope);
+  Value* outstream = interp->ConstructClass("Stream", {}, interp->topScope);
   std::vector<Value*> args = { new Value("flush", "string"), new Function(interp, write) };
-  ((Function*)stdout->Get("on"))->Call(args, stdout, interp->topScope, false);
+  ((Function*)outstream->Get("on"))->Call(args, outstream, interp->topScope, false);
 
   // Defining Impala and stdout Objects
-  Impala->Define("stdout", stdout);
+  Impala->Define("stdout", outstream);
   globals->Define("Impala", Impala);
 }
