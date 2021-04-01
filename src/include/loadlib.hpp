@@ -9,16 +9,33 @@ class DynamicLib {
   DynamicLib(std::string libPath): libPath(libPath), _handle(nullptr) {};
   ~DynamicLib() = default;
 
-  void OpenLib();
+  void OpenLib() {
+    if (!(_handle = LoadLibraryA(libPath.c_str()))) {
+      std::cerr << "Can't open and load " << libPath << std::endl;
+    }
+  };
 
   template <typename T>
-  std::shared_ptr<T> GetSymbol(const char *);
+  std::shared_ptr<T> GetSymbol(const char * sm) {
+    T item = reinterpret_cast<T>(GetProcAddress(_handle, sm));
 
-  void CloseLib();
+    if (item == nullptr) {
+      CloseLib();
+      std::cerr << "Cannot find symbol in DLL " + libPath << std::endl;
+    }
+
+    return std::make_shared<T>(item);
+  };
+
+  void CloseLib() {
+    if (FreeLibrary(_handle) == 0) {
+      std::cerr << "Cannot close " << libPath << std::endl;
+    }
+  };
 
   private:
   std::string libPath;
-  void* _handle;
+  HMODULE  _handle;
 };
 
 // #elif defined(unix) || defined(__linux__) || defined(__APPLE__)

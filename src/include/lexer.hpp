@@ -200,6 +200,8 @@ namespace Impala {
             case 'n': c = '\n'; break;
             case 't': c = '\t'; break;
             case 'r': c = '\r'; break;
+            case '"': c = '\"'; break;
+            case '\'': c = '\''; break;
             // all other escapes
             default: {
               *it--;
@@ -234,7 +236,9 @@ namespace Impala {
         peek() == '\\' ||
         peek() == 'n' ||
         peek() == 'r' ||
-        peek() == 't'
+        peek() == 't' ||
+        peek() == '"' ||
+        peek() == '\''
       )) {
         advance();
         

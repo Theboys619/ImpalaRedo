@@ -2,7 +2,7 @@ using namespace Impala;
 
 Value* fileReadImp(Value* self, std::vector<Value*> args, std::string file) {
   std::string fileName = args[0]->ToString();
-  fs::path fullfile = fs::path(file).remove_filename() / fs::path(fileName);
+  fs::path fullfile = fs::path(file).remove_filename() / fs::absolute(fs::path(fileName)).filename();
   
   return new Value(readFile(fullfile.string()));
 }
@@ -27,7 +27,7 @@ Value* write(Value* self, std::vector<Value*> args, std::string file) {
 void DefineGlobals(Interpreter* interp, Scope* globals) {
 
   // Reading Globals.imp file
-  fs::path fullFile = fs::current_path() / fs::path("./src/globals/globals.imp");
+  fs::path fullFile = fs::absolute(fs::path("./src/globals/globals.imp"));
   interp->Interpret(fullFile.string());
 
   // Creating Global Impala Object

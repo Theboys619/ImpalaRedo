@@ -1,4 +1,11 @@
-import h from "./libtest.so";
+import h from "./libhttp.so";
+import text from "https://impala-docs.rohilpatel.repl.co/std/http/http.imp";
 
-h.printLol();
-h.lol().classes();
+log(
+  h.fetch(
+    "https://impala-docs.rohilpatel.repl.co/std/http/http.imp",
+    "POST", 
+    "{ \"test\": \"nice\" }",
+    "application/json"
+  )
+);

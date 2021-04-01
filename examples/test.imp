@@ -1,1 +1,3 @@
+import text from "https://impala-docs.rohilpatel.repl.co/std/http/http.imp";
+
 log("Hello, World!");

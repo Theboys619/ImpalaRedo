@@ -538,7 +538,7 @@ namespace Impala {
     Value* iImport(Expression* exp, Scope* scope) {
       Interpreter* interp = new Interpreter(globals);
       std::string fileName = exp->value.getString();
-      fs::path fullfile = fs::path(file).remove_filename() / fs::path(fileName);
+      fs::path fullfile = fs::path(file).remove_filename() / fs::absolute(fs::path(fileName)).filename();
       std::string data = fullfile.string();
       bool isURL = false;
       bool isDLL = false;

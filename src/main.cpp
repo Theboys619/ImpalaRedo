@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     return raw(argv[2], argv, globals, interp);
   
   fs::path impFile = argv[1];
-  fs::path fullFile = fs::current_path() / impFile;
+  fs::path fullFile = fs::current_path() / fs::absolute(impFile);
 
   try {
     interp->Interpret(fullFile.string());
