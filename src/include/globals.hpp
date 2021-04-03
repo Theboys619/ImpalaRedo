@@ -28,7 +28,6 @@ void DefineGlobals(Interpreter* interp, Scope* globals, std::string exepath) {
 
   // Reading Globals.imp file
   fs::path fullFile = (fs::absolute(exepath).remove_filename()) / fs::path("./src/globals/globals.imp");
-  std::cout << fullFile << std::endl;
   interp->Interpret(fullFile.string());
 
   // Creating Global Impala Object
