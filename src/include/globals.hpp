@@ -24,10 +24,11 @@ Value* write(Value* self, std::vector<Value*> args, std::string file) {
   return outstream;
 }
 
-void DefineGlobals(Interpreter* interp, Scope* globals) {
+void DefineGlobals(Interpreter* interp, Scope* globals, std::string exepath) {
 
   // Reading Globals.imp file
-  fs::path fullFile = fs::absolute(fs::path("./src/globals/globals.imp"));
+  fs::path fullFile = (fs::absolute(exepath).remove_filename()) / fs::path("./src/globals/globals.imp");
+  std::cout << fullFile << std::endl;
   interp->Interpret(fullFile.string());
 
   // Creating Global Impala Object

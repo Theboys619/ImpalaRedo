@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
   globals->Define("input", new Function(interp, input));
   interp->SetGlobals(globals);
 
-  DefineGlobals(interp, globals);
+  DefineGlobals(interp, globals, std::string(argv[0]));
 
   if (std::string(argv[1]) == "-e")
     return raw(argv[2], argv, globals, interp);
