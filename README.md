@@ -20,7 +20,7 @@ make
 
 #### Windows
 Have the Windows.h files or SDK installed.
-In the `~/dist` folder create a new folder called `linux_x86`. The folder path should be `~/dist/linux_x86`
+In the `~/dist` folder create a new folder called `win_x86`. The folder path should be `~/dist/win_x86`
 
 **Compiling:**
 ```bash
