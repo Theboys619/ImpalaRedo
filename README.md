@@ -9,6 +9,10 @@ Need a C++ compiler with C++2a support. C++2a is used for `std::filesystem`.
 Also make sure to create folders for the corresponding executable.
 These should be in a `~/dist` folder in the root of the project.
 
+Also some dependencies which are:
+- openssl for the `-lssl` and `-lcrypto` static libraries
+- standard c++ filesystem helper aka `-lstdc++fs`
+
 #### Linux
 In the `~/dist` folder create a new folder called `linux_x86`. The folder path should be `~/dist/linux_x86`
 
@@ -19,7 +23,7 @@ make
 ```
 
 #### Windows
-Have the Windows.h files or SDK installed.
+Have the Windows.h files and SDK installed.
 In the `~/dist` folder create a new folder called `win_x86`. The folder path should be `~/dist/win_x86`
 
 **Compiling:**
