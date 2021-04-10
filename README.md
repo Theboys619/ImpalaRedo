@@ -13,7 +13,7 @@ Also some dependencies which are:
 - openssl for the `-lssl` and `-lcrypto` static libraries
 - standard c++ filesystem helper aka `-lstdc++fs`
 
-#### Linux
+### Linux
 In the `~/dist` folder create a new folder called `linux_x86`. The folder path should be `~/dist/linux_x86`
 
 **Compiling:**
@@ -22,7 +22,7 @@ In the `~/dist` folder create a new folder called `linux_x86`. The folder path s
 make
 ```
 
-#### Windows
+### Windows
 Have the Windows.h files and SDK installed.
 In the `~/dist` folder create a new folder called `win_x86`. The folder path should be `~/dist/win_x86`
 
